@@ -1,0 +1,561 @@
+import pool from '../config/db.js';
+import { logAudit } from '../services/audit.service.js';
+
+// ─── GET /invoices ────────────────────────────────────────────────────────────
+export async function getAllInvoices(req, res) {
+  const {
+    search, status, aging_bucket, billing_month,
+    property_name, tenant_name, category,
+    page = 1, limit = 50,
+  } = req.query;
+
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const params = [];
+  let where = 'WHERE 1=1';
+
+  const add = (clause, value) => {
+    params.push(value);
+    where += ` AND ${clause.replace('?', `$${params.length}`)}`;
+  };
+
+  if (search) {
+    params.push(`%${search}%`);
+    where += ` AND (i.tenant_name ILIKE $${params.length}
+                 OR i.property_name ILIKE $${params.length}
+                 OR i.category ILIKE $${params.length})`;
+  }
+  if (status) add('i.status = ?', status);
+  if (aging_bucket) add('i.aging_bucket = ?', aging_bucket);
+  if (billing_month) add('i.billing_month = ?', billing_month);
+  if (property_name) add('i.property_name = ?', property_name);
+  if (tenant_name) add('i.tenant_name = ?', tenant_name);
+  if (category) add('i.category = ?', category);
+
+  const dataQuery = `
+    SELECT
+      i.*,
+      p.city          AS property_city,
+      t.unit_no       AS tenant_unit,
+      t.phone         AS tenant_phone
+    FROM invoices i
+    LEFT JOIN properties p ON p.id = i.property_id
+    LEFT JOIN tenants     t ON t.id = i.tenant_id
+    ${where}
+    ORDER BY i.bill_date DESC, i.created_at DESC
+    LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+  `;
+
+  const countQuery = `SELECT COUNT(*) FROM invoices i ${where}`;
+
+  const [dataRes, countRes] = await Promise.all([
+    pool.query(dataQuery, [...params, parseInt(limit), offset]),
+    pool.query(countQuery, params),
+  ]);
+
+  res.json({
+    success: true,
+    data: dataRes.rows,
+    meta: {
+      total: parseInt(countRes.rows[0].count),
+      page: parseInt(page),
+      limit: parseInt(limit),
+      pages: Math.ceil(countRes.rows[0].count / parseInt(limit)),
+    },
+  });
+}
+
+// ─── GET /invoices/:id ────────────────────────────────────────────────────────
+export async function getInvoiceById(req, res) {
+  const { rows } = await pool.query(
+    `SELECT
+       i.*,
+       p.city    AS property_city,
+       p.address AS property_address,
+       t.unit_no AS tenant_unit,
+       t.phone   AS tenant_phone,
+       t.email   AS tenant_email,
+       t.gstin   AS tenant_gstin,
+       -- receipts against this invoice
+       COALESCE(
+         json_agg(
+           json_build_object(
+             'id',           r.id,
+             'amount',       r.amount,
+             'payment_date', r.payment_date,
+             'payment_mode', r.payment_mode,
+             'reference_no', r.reference_no,
+             'remarks',      r.remarks
+           ) ORDER BY r.payment_date DESC
+         ) FILTER (WHERE r.id IS NOT NULL),
+         '[]'
+       ) AS receipts
+     FROM invoices i
+     LEFT JOIN properties p ON p.id = i.property_id
+     LEFT JOIN tenants     t ON t.id = i.tenant_id
+     LEFT JOIN receipts    r ON r.invoice_id = i.id
+     WHERE i.id = $1
+     GROUP BY i.id, p.city, p.address, t.unit_no, t.phone, t.email, t.gstin`,
+    [req.params.id]
+  );
+  if (!rows.length)
+    return res.status(404).json({ success: false, message: 'Invoice not found' });
+  res.json({ success: true, data: rows[0] });
+}
+
+// ─── GET /invoices/stats ──────────────────────────────────────────────────────
+export async function getInvoiceStats(req, res) {
+  const { billing_month } = req.query;
+  const params = [];
+  let where = '';
+  if (billing_month) {
+    params.push(billing_month);
+    where = `WHERE billing_month = $1`;
+  }
+
+  const { rows } = await pool.query(
+    `SELECT
+       COUNT(*)                                            AS total_invoices,
+       COALESCE(SUM(bill_amount),         0)              AS total_billed,
+       COALESCE(SUM(amount_collected),    0)              AS total_collected,
+       COALESCE(SUM(outstanding_balance), 0)              AS total_outstanding,
+       COUNT(*) FILTER (WHERE status = 'Paid')            AS paid_count,
+       COUNT(*) FILTER (WHERE status = 'Pending')         AS pending_count,
+       COUNT(*) FILTER (WHERE status = 'Partial')         AS partial_count,
+       COALESCE(SUM(outstanding_balance)
+         FILTER (WHERE aging_bucket = 'Current'),    0)   AS aging_current,
+       COALESCE(SUM(outstanding_balance)
+         FILTER (WHERE aging_bucket = '1-30 Days'),  0)   AS aging_1_30,
+       COALESCE(SUM(outstanding_balance)
+         FILTER (WHERE aging_bucket = '31-60 Days'), 0)   AS aging_31_60,
+       COALESCE(SUM(outstanding_balance)
+         FILTER (WHERE aging_bucket = '61-90 Days'), 0)   AS aging_61_90,
+       COALESCE(SUM(outstanding_balance)
+         FILTER (WHERE aging_bucket = '90+ Days'),   0)   AS aging_90_plus
+     FROM invoices ${where}`,
+    params
+  );
+  res.json({ success: true, data: rows[0] });
+}
+
+// ─── GET /invoices/billing-months ─────────────────────────────────────────────
+export async function getBillingMonths(req, res) {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT billing_month
+     FROM invoices
+     WHERE billing_month IS NOT NULL AND billing_month <> ''
+     ORDER BY billing_month DESC
+     LIMIT 24`
+  );
+  res.json({ success: true, data: rows.map((r) => r.billing_month) });
+}
+
+// ─── POST /invoices ───────────────────────────────────────────────────────────
+export async function createInvoice(req, res) {
+  const {
+    property_name, tenant_name, property_id, tenant_id,
+    category, bill_date, bill_amount, billing_month,
+    credit_terms_days, due_date, status,
+    amount_collected, outstanding_balance,
+    overdue_by_days, aging_bucket,
+  } = req.body;
+
+  const { rows } = await pool.query(
+    `INSERT INTO invoices
+       (property_name, tenant_name, property_id, tenant_id,
+        category, bill_date, bill_amount, billing_month,
+        credit_terms_days, due_date, status,
+        amount_collected, outstanding_balance,
+        overdue_by_days, aging_bucket)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+     RETURNING *`,
+    [
+      property_name, tenant_name, property_id ?? null, tenant_id ?? null,
+      category, bill_date, bill_amount, billing_month,
+      credit_terms_days, due_date ?? null, status,
+      amount_collected, outstanding_balance,
+      overdue_by_days, aging_bucket,
+    ]
+  );
+  
+  await logAudit(req.user, 'CREATE', 'INVOICE', rows[0].id, { property_id, tenant_id, bill_amount, billing_month });
+
+  res.status(201).json({ success: true, data: rows[0] });
+}
+
+// ─── PUT /invoices/:id ────────────────────────────────────────────────────────
+export async function updateInvoice(req, res) {
+  const fields = { ...req.body };
+  const keys = Object.keys(fields);
+  if (!keys.length)
+    return res.status(400).json({ success: false, message: 'Nothing to update' });
+
+  const setClauses = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+  const values = [...Object.values(fields), req.params.id];
+
+  const { rows } = await pool.query(
+    `UPDATE invoices SET ${setClauses}
+     WHERE id = $${values.length} RETURNING *`,
+    values
+  );
+  if (!rows.length)
+    return res.status(404).json({ success: false, message: 'Invoice not found' });
+    
+  await logAudit(req.user, 'UPDATE', 'INVOICE', req.params.id, fields);
+
+  res.json({ success: true, data: rows[0] });
+}
+
+// ─── POST /invoices/generate ──────────────────────────────────────────────────
+function validateNotFutureMonth(billingMonth, billDate) {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const [mStr, yStr] = billingMonth.split('-');
+  const mIndex = months.indexOf(mStr);
+  const year = parseInt(yStr);
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+
+  if (year > currentYear || (year === currentYear && mIndex > currentMonth)) {
+    return 'Cannot generate invoices for future billing months';
+  }
+
+  const bDate = new Date(billDate);
+  const todayEnd = new Date();
+  todayEnd.setHours(23, 59, 59, 999);
+  if (bDate > todayEnd) {
+    return 'Bill Date cannot be in the future';
+  }
+
+  if (bDate.getFullYear() !== year || bDate.getMonth() !== mIndex) {
+    return 'Bill Date must fall within the exact same month as the Billing Month';
+  }
+
+  return null;
+}
+
+function isEscalationApplicable(billingMonthStr, escalationDueDate) {
+  if (!escalationDueDate) return false;
+  const [y, m] = billingMonthStr.split('-');
+  const bYear = parseInt(y);
+  const bMonth = parseInt(m) - 1; // 0-indexed
+
+  const d = new Date(escalationDueDate);
+  const dYear = d.getFullYear();
+  const dMonth = d.getMonth();
+
+  if (bYear > dYear || (bYear === dYear && bMonth >= dMonth)) {
+    return true;
+  }
+  return false;
+}
+
+export async function generateInvoices(req, res) {
+  const { tenant_id, billing_month, bill_date, categories } = req.body;
+  // categories: [{ category, amount }]
+
+  if (!tenant_id || !billing_month || !categories?.length)
+    return res.status(400).json({
+      success: false,
+      message: 'tenant_id, billing_month and categories are required',
+    });
+
+  const tenantRes = await pool.query(
+    `SELECT t.*, p.name AS property_name
+     FROM tenants t
+     LEFT JOIN properties p ON p.id = t.property_id
+     WHERE t.id = $1`,
+    [tenant_id]
+  );
+  if (!tenantRes.rows.length)
+    return res.status(404).json({ success: false, message: 'Tenant not found' });
+
+  const tenant = tenantRes.rows[0];
+  const billDate = bill_date || new Date().toISOString().split('T')[0];
+
+  const validationError = validateNotFutureMonth(billing_month, billDate);
+  if (validationError) {
+    return res.status(400).json({ success: false, message: validationError });
+  }
+
+  const created = [];
+  let skippedCount = 0;
+  for (const cat of categories) {
+    // Check if invoice already exists for this tenant, month, and category
+    const existing = await pool.query(
+      `SELECT id FROM invoices WHERE tenant_id = $1 AND billing_month = $2 AND category = $3`,
+      [tenant.id, billing_month, cat.category]
+    );
+
+    if (existing.rows.length > 0) {
+      skippedCount++;
+      continue;
+    }
+
+    const catName = String(cat.category || 'Rent').toLowerCase();
+    const creditDays = (catName.includes('power') || catName.includes('water')) ? 7 : 45;
+    const dueDate = new Date(billDate);
+    dueDate.setDate(dueDate.getDate() + creditDays);
+
+    const dueDateStr = dueDate.toISOString().split('T')[0];
+
+    let daysOverdue = 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueTime = new Date(dueDateStr);
+    dueTime.setHours(0, 0, 0, 0);
+    
+    const diffTime = today - dueTime;
+    if (diffTime > 0) {
+      daysOverdue = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    }
+    
+    let agingBucket = 'Current';
+    if (daysOverdue > 90) agingBucket = '90+ Days';
+    else if (daysOverdue > 60) agingBucket = '61-90 Days';
+    else if (daysOverdue > 30) agingBucket = '31-60 Days';
+    else if (daysOverdue > 0) agingBucket = '1-30 Days';
+
+    let finalAmount = cat.amount;
+    if ((cat.category === 'Rent & CAM' || cat.category === 'Rent') && tenant.escalation_new_rent) {
+      if (isEscalationApplicable(billing_month, tenant.escalation_due_date)) {
+        finalAmount = tenant.escalation_new_rent;
+      }
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO invoices
+         (property_name, tenant_name, property_id, tenant_id,
+          category, bill_date, bill_amount, billing_month,
+          credit_terms_days, due_date, status,
+          amount_collected, outstanding_balance,
+          overdue_by_days, aging_bucket)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Pending',0,$7,$11,$12)
+       RETURNING *`,
+      [
+        tenant.property_name,
+        tenant.name,
+        tenant.property_id,
+        tenant.id,
+        cat.category,
+        billDate,
+        finalAmount,
+        billing_month,
+        creditDays,
+        dueDateStr,
+        daysOverdue,
+        agingBucket,
+      ]
+    );
+    created.push(rows[0]);
+    await logAudit(req.user, 'CREATE', 'INVOICE', rows[0].id, { tenant_id, bill_amount: cat.amount, billing_month, generated: true });
+  }
+
+  res.status(201).json({
+    success: true,
+    message: created.length > 0 ? 'Invoice created successfully!' : 'Invoice already exists for this month.',
+    data: created,
+  });
+}
+
+// ─── POST /invoices/bulk-generate ─────────────────────────────────────────────
+export async function bulkGenerateInvoices(req, res) {
+  const { billing_month, bill_date, category } = req.body;
+
+  if (!billing_month || !bill_date || !category)
+    return res.status(400).json({
+      success: false,
+      message: 'billing_month, bill_date, and category are required',
+    });
+
+  const validationError = validateNotFutureMonth(billing_month, bill_date);
+  if (validationError) {
+    return res.status(400).json({ success: false, message: validationError });
+  }
+
+  // Get all active tenants with their categories
+  const tenantRes = await pool.query(`
+    SELECT t.*, p.name AS property_name,
+      COALESCE(
+        (SELECT json_agg(json_build_object('category', tc.category, 'amount', tc.amount))
+         FROM tenant_categories tc
+         WHERE tc.tenant_id = t.id AND tc.is_active = TRUE),
+        '[]'::json
+      ) AS categories
+    FROM tenants t
+    LEFT JOIN properties p ON p.id = t.property_id
+    WHERE t.is_active = TRUE
+  `);
+  
+  if (!tenantRes.rows.length) {
+    return res.status(404).json({ success: false, message: 'No active tenants found' });
+  }
+
+  let createdCount = 0;
+  let skippedCount = 0;
+
+  for (const tenant of tenantRes.rows) {
+    // Find if tenant has the requested category
+    const catObj = tenant.categories?.find(c => c.category === category);
+    
+    let amount = 0;
+    if (catObj) {
+      amount = parseFloat(catObj.amount) || 0;
+    } else if (category === 'Rent & CAM' || category === 'Rent') {
+      // Fallback for Rent & CAM if not in categories list explicitly
+      amount = (parseFloat(tenant.monthly_rent) || 0) + (parseFloat(tenant.cam_amount) || 0);
+    }
+
+    if ((category === 'Rent & CAM' || category === 'Rent') && tenant.escalation_new_rent) {
+      if (isEscalationApplicable(billing_month, tenant.escalation_due_date)) {
+        amount = parseFloat(tenant.escalation_new_rent);
+      }
+    }
+
+    if (amount <= 0) {
+      skippedCount++;
+      continue;
+    }
+
+    // Check if invoice already exists for this month for this tenant and category
+    const existing = await pool.query(
+      `SELECT id FROM invoices WHERE tenant_id = $1 AND billing_month = $2 AND category = $3`,
+      [tenant.id, billing_month, category]
+    );
+
+    if (existing.rows.length > 0) {
+      skippedCount++;
+      continue;
+    }
+
+    const catName = String(category).toLowerCase();
+    const creditDays = (catName.includes('power') || catName.includes('water')) ? 7 : 45;
+    const dueDate = new Date(bill_date);
+    dueDate.setDate(dueDate.getDate() + creditDays);
+
+    const dueDateStr = dueDate.toISOString().split('T')[0];
+
+    let daysOverdue = 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueTime = new Date(dueDateStr);
+    dueTime.setHours(0, 0, 0, 0);
+    
+    const diffTime = today - dueTime;
+    if (diffTime > 0) {
+      daysOverdue = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    }
+    
+    let agingBucket = 'Current';
+    if (daysOverdue > 90) agingBucket = '90+ Days';
+    else if (daysOverdue > 60) agingBucket = '61-90 Days';
+    else if (daysOverdue > 30) agingBucket = '31-60 Days';
+    else if (daysOverdue > 0) agingBucket = '1-30 Days';
+
+    await pool.query(
+      `INSERT INTO invoices
+         (property_name, tenant_name, property_id, tenant_id,
+          category, bill_date, bill_amount, billing_month,
+          credit_terms_days, due_date, status,
+          amount_collected, outstanding_balance,
+          overdue_by_days, aging_bucket)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Pending',0,$7,$11,$12)`,
+      [
+        tenant.property_name || '—',
+        tenant.name,
+        tenant.property_id,
+        tenant.id,
+        category,
+        bill_date,
+        amount,
+        billing_month,
+        creditDays,
+        dueDateStr,
+        daysOverdue,
+        agingBucket,
+      ]
+    );
+    createdCount++;
+    await logAudit(req.user, 'CREATE', 'INVOICE', null, { tenant_id: tenant.id, bill_amount: amount, billing_month, generated: true, bulk: true });
+  }
+
+  res.status(201).json({
+    success: true,
+    message: 'Bulk invoice generation completed!',
+  });
+}
+
+// ─── POST /invoices/send-reminders ─────────────────────────────────────────────
+import { sendReminderEmail } from '../utils/mailer.js';
+
+export async function sendOverdueReminders(req, res) {
+  try {
+    const { tenant_name, override_email } = req.body;
+    const params = [];
+    let tenantFilter = '';
+    
+    if (tenant_name) {
+      params.push(tenant_name);
+      tenantFilter = 'AND i.tenant_name = $1';
+      
+      // If an override email is provided, save it permanently to the tenant!
+      if (override_email) {
+        await pool.query('UPDATE tenants SET email = $1 WHERE name = $2', [override_email, tenant_name]);
+      }
+    }
+
+    // Fetch all pending/partial invoices that are overdue
+    const { rows } = await pool.query(`
+      SELECT 
+        i.*, 
+        t.email AS tenant_email
+      FROM invoices i
+      JOIN tenants t ON i.tenant_id = t.id
+      WHERE (i.status = 'Pending' OR i.status = 'Partial')
+        AND i.outstanding_balance > 0
+        AND i.due_date < CURRENT_DATE
+        ${tenantFilter}
+    `, params);
+
+    if (rows.length === 0) {
+      return res.json({ success: true, message: 'No overdue invoices found for this tenant.' });
+    }
+
+    // Group by tenant
+    const tenantGroups = {};
+    for (const inv of rows) {
+      if (!tenantGroups[inv.tenant_id]) {
+        tenantGroups[inv.tenant_id] = {
+          tenant_name: inv.tenant_name,
+          email: override_email || inv.tenant_email,
+          invoices: [],
+          total_outstanding: 0,
+        };
+      }
+      tenantGroups[inv.tenant_id].invoices.push(inv);
+      tenantGroups[inv.tenant_id].total_outstanding += Number(inv.outstanding_balance);
+    }
+
+    let sentCount = 0;
+    for (const tenantId in tenantGroups) {
+      const group = tenantGroups[tenantId];
+      const success = await sendReminderEmail(
+        group.email,
+        group.tenant_name,
+        group.invoices,
+        group.total_outstanding
+      );
+      if (success) {
+        sentCount++;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Sent reminders to ${sentCount} tenant(s) successfully.`,
+    });
+  } catch (error) {
+    console.error('Error sending reminders:', error);
+    res.status(500).json({ success: false, message: 'Internal server error while sending reminders' });
+  }
+}
