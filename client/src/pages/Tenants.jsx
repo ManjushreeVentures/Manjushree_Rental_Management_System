@@ -736,7 +736,13 @@ export default function Tenants() {
               <div className="bg-teal-50/50 p-4 rounded-xl border border-teal-100/50">
                 <p className="text-xs text-teal-600 font-medium mb-1">Tenant Name</p>
                 <p className="font-semibold text-slate-900">{selected.name}</p>
-                {selected.gstin && <p className="text-[10px] text-slate-500 font-mono mt-1">GST: {selected.gstin}</p>}
+                {selected.gstin && <p className="text-[10px] text-slate-500 font-mono mt-1 mb-1">GST: {selected.gstin}</p>}
+                {(selected.phone || selected.email) && (
+                  <div className="mt-2 pt-2 border-t border-teal-200/50 space-y-1">
+                    {selected.phone && <p className="text-xs text-slate-700 font-medium flex items-center gap-1">📞 {selected.phone}</p>}
+                    {selected.email && <p className="text-xs text-slate-600 flex items-center gap-1">✉️ {selected.email}</p>}
+                  </div>
+                )}
               </div>
               <div className="bg-teal-50/50 p-4 rounded-xl border border-teal-100/50">
                 <p className="text-xs text-teal-600 font-medium mb-1">Property</p>

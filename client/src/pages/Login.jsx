@@ -3,8 +3,8 @@ import { Building2, Lock, Mail, Eye, EyeOff } from 'lucide-react';
 import { authApi } from '../api/auth.api';
 
 export default function Login({ onLogin }) {
-  const [email, setEmail] = useState('admin@rentflow.com');
-  const [password, setPassword] = useState('Admin@123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');

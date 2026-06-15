@@ -228,9 +228,16 @@ export async function deleteReceipt(req, res) {
 
 // ─── GET /receipts/stats ──────────────────────────────────────────────────────
 export async function getReceiptStats(req, res) {
-  const { date_from, date_to } = req.query;
+  const { date_from, date_to, billing_month } = req.query;
   const params = [];
   let where    = 'WHERE 1=1';
+  let join     = '';
+
+  if (billing_month) {
+    join = 'JOIN invoices i ON i.id = r.invoice_id';
+    params.push(billing_month);
+    where += ` AND i.billing_month = $${params.length}`;
+  }
 
   if (date_from) { params.push(date_from); where += ` AND r.payment_date >= $${params.length}::date`; }
   if (date_to)   { params.push(date_to);   where += ` AND r.payment_date <= $${params.length}::date`; }
@@ -249,7 +256,7 @@ export async function getReceiptStats(req, res) {
          (WHERE r.payment_mode = 'UPI'),   0)            AS upi,
        COALESCE(SUM(r.amount) FILTER
          (WHERE r.payment_mode = 'Cash'),  0)            AS cash
-     FROM receipts r ${where}`,
+     FROM receipts r ${join} ${where}`,
     params
   );
   res.json({ success: true, data: rows[0] });

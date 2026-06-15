@@ -49,7 +49,7 @@ const agingConfig = [
 // ─── KPI Cards ────────────────────────────────────────────────────────────────
 function KPICards({ kpis, onNavigate }) {
   if (!kpis) return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 mb-6">
+    <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 mb-6">
       {Array.from({ length: 5 }).map((_, i) => (
         <div key={i} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm
           animate-pulse h-28" />
@@ -143,7 +143,7 @@ function KPICards({ kpis, onNavigate }) {
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 mb-6">
+    <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 mb-6">
       {cards.map((c) => {
         const Icon = c.icon;
         return (
@@ -151,7 +151,7 @@ function KPICards({ kpis, onNavigate }) {
             key={c.label}
             onClick={() => c.nav && onNavigate(c.nav)}
             className="relative rounded-xl border border-slate-200 bg-white p-4 shadow-sm
-              text-left hover:shadow-md hover:border-teal-200 transition group"
+              text-left md:hover:shadow-md md:hover:border-teal-200 transition group"
           >
             <div className="flex items-start justify-between gap-2">
               <div className={`h-8 w-8 rounded-lg ${c.iconBg}
@@ -159,7 +159,7 @@ function KPICards({ kpis, onNavigate }) {
                 <Icon className={`h-4 w-4 ${c.iconCls}`} />
               </div>
               <ArrowUpRight className="h-3 w-3 text-slate-300
-                group-hover:text-teal-400 transition mt-0.5" />
+                md:group-hover:text-teal-400 transition mt-0.5" />
             </div>
             <p className="mt-2 text-lg font-bold text-slate-900 leading-tight truncate" title={c.value}>
               {c.value}
@@ -174,8 +174,8 @@ function KPICards({ kpis, onNavigate }) {
             {/* Hover Tooltip */}
             {c.tooltip && (
               <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 w-[90%] z-50 
-                opacity-0 invisible group-hover:opacity-100 group-hover:visible 
-                transition-all duration-200 scale-95 group-hover:scale-100 origin-top pointer-events-none">
+                opacity-0 invisible md:group-hover:opacity-100 md:group-hover:visible 
+                transition-all duration-200 scale-95 md:group-hover:scale-100 origin-top pointer-events-none">
                 <div className="bg-white border border-slate-200 shadow-xl rounded-lg p-3 relative">
                   {c.tooltip}
                   <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-l border-t border-slate-200 rotate-45"></div>
@@ -196,7 +196,7 @@ function AgingStrip({ aging }) {
   const total = parseFloat(aging.total) || 1;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/60 backdrop-blur-md shadow-sm mb-6 p-1">
+    <div className="rounded-xl border border-slate-200 bg-white/60 backdrop-blur-md shadow-sm mb-6 p-1 min-w-0 overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4 bg-white/80 rounded-t-xl">
         <div>
           <h2 className="font-semibold text-slate-900 text-lg flex items-center gap-2">
@@ -229,8 +229,8 @@ function AgingStrip({ aging }) {
           {agingConfig.map((a) => {
             const pct = (parseFloat(aging[a.key]) / total) * 100;
             return (
-              <div key={a.key} className={`relative overflow-hidden rounded-xl border border-slate-100 ${a.bg} p-4 hover:shadow-md transition-shadow group bg-opacity-40 backdrop-blur-sm`}>
-                <div className={`absolute top-0 left-0 w-full h-1 ${a.bar} opacity-70 group-hover:opacity-100 transition-opacity`} />
+              <div key={a.key} className={`relative overflow-hidden rounded-xl border border-slate-100 ${a.bg} p-4 md:hover:shadow-md transition-shadow group bg-opacity-40 backdrop-blur-sm`}>
+                <div className={`absolute top-0 left-0 w-full h-1 ${a.bar} opacity-70 md:group-hover:opacity-100 transition-opacity`} />
                 <p className="text-sm font-medium text-slate-600 mb-1">{a.label}</p>
                 <p className={`text-xl font-extrabold ${a.text}`}>
                   {formatCurrency(aging[a.key])}
@@ -268,7 +268,7 @@ function TenantSummaryTable({ tenants, onNavigate }) {
   );
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm mb-6">
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm mb-6 min-w-0 overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
         <div className="flex items-center gap-2">
           <Users className="h-5 w-5 text-slate-400" />
@@ -308,7 +308,7 @@ function TenantSummaryTable({ tenants, onNavigate }) {
             )}
             {tenants.map((t) => (
               <tr key={`${t.tenant_name}-${t.property_name}-${t.category}`}
-                className="hover:bg-slate-50/60 transition-colors">
+                className="md:hover:bg-slate-50/60 transition-colors">
                 <td className="px-5 py-3.5">
                   <p className="font-medium text-slate-900">{t.tenant_name}</p>
                   <p className="text-xs font-semibold text-teal-700 mt-0.5">{t.category}</p>
@@ -394,7 +394,7 @@ function AlertsPanel({ alerts, onNavigate }) {
   const cfg = alertColors[tab];
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm mb-6">
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm mb-6 min-w-0 overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
         <h2 className="font-semibold text-slate-900 flex items-center gap-2">
           <AlertCircle className="h-5 w-5 text-red-500" />
@@ -442,9 +442,9 @@ function AlertsPanel({ alerts, onNavigate }) {
         ) : activeData.map((item, i) => (
           <div key={i} className={`flex items-center justify-between
             gap-4 px-5 py-4 ${cfg.bg}`}>
-            <div>
-              <p className="font-medium text-slate-900">{item.tenant_name}</p>
-              <p className="text-xs text-slate-500">{item.property_name}</p>
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-slate-900 truncate">{item.tenant_name}</p>
+              <p className="text-xs text-slate-500 truncate">{item.property_name}</p>
               {item.billing_month && (
                 <p className="text-xs text-slate-400 mt-0.5">{formatBillingMonth(item.billing_month)}</p>
               )}
@@ -483,11 +483,11 @@ function RecentActivity({ activity }) {
   if (!activity) return null;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm min-w-0 overflow-hidden">
       <div className="border-b border-slate-200 px-5 py-4">
         <h2 className="font-semibold text-slate-900">Recent Activity</h2>
       </div>
-      <div className="flex border-b border-slate-200">
+      <div className="flex overflow-x-auto border-b border-slate-200">
         {[
           { id: 'invoices', label: 'Invoices', icon: FileText },
           { id: 'receipts', label: 'Receipts', icon: Receipt },
@@ -513,14 +513,14 @@ function RecentActivity({ activity }) {
             ? <p className="py-8 text-center text-sm text-slate-400">No invoices yet</p>
             : activity.recentInvoices?.map((inv) => (
               <div key={inv.id}
-                className="flex items-center justify-between gap-4 px-5 py-3.5">
-                <div>
-                  <p className="font-medium text-slate-800">{inv.tenant_name}</p>
-                  <p className="text-xs text-slate-400">
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 px-5 py-3.5">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-slate-800 truncate">{inv.tenant_name}</p>
+                  <p className="text-xs text-slate-400 truncate">
                     {inv.property_name} · {formatBillingMonth(inv.billing_month)}
                   </p>
                 </div>
-                <div className="text-right">
+                <div className="flex items-center justify-between sm:flex-col sm:items-end sm:justify-start gap-2 shrink-0">
                   <p className="font-semibold text-slate-900">
                     {formatCurrency(inv.bill_amount)}
                   </p>
@@ -534,14 +534,14 @@ function RecentActivity({ activity }) {
             ? <p className="py-8 text-center text-sm text-slate-400">No receipts yet</p>
             : activity.recentReceipts?.map((r) => (
               <div key={r.id}
-                className="flex items-center justify-between gap-4 px-5 py-3.5">
-                <div>
-                  <p className="font-medium text-slate-800">{r.tenant_name}</p>
-                  <p className="text-xs text-slate-400">
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 px-5 py-3.5">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-slate-800 truncate">{r.tenant_name}</p>
+                  <p className="text-xs text-slate-400 truncate">
                     {r.property_name} · {formatBillingMonth(r.billing_month)}
                   </p>
                 </div>
-                <div className="text-right">
+                <div className="flex items-center justify-between sm:flex-col sm:items-end sm:justify-start gap-2 shrink-0">
                   <p className="font-bold text-emerald-700">
                     {formatCurrency(r.amount)}
                   </p>

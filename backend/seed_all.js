@@ -70,6 +70,16 @@ const seedData = [
     units: [
       { unitName: 'JPPL Block', tenantName: 'British Enginees', area: 43741, isVacant: false, rent: 1194129.30 }
     ]
+  },
+  {
+    name: 'MUCPL - 1 Shobha',
+    total_area: 0,
+    leased_area: 0,
+    vacant_area: 0,
+    total_amount: 11800,
+    units: [
+      { unitName: 'Main Unit', tenantName: 'Manjushree Fincap Pvt Ltd', area: 0, isVacant: false, rent: 11800 }
+    ]
   }
 ];
 

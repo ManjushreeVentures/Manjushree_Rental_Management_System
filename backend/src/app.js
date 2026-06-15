@@ -25,10 +25,6 @@ import path from 'path';
 const app  = express();
 const PORT = process.env.PORT ?? 5000;
 
-// Ensure uploads directory exists
-if (!fs.existsSync('uploads')) {
-  fs.mkdirSync('uploads', { recursive: true });
-}
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -47,7 +43,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-// removed: app.use('/uploads', express.static('uploads'));
+
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', ts: new Date() }));
 

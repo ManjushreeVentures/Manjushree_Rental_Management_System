@@ -59,13 +59,13 @@ function InvoiceKPIs({ stats }) {
         const Icon = c.icon;
         return (
           <div key={c.label}
-            className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm flex gap-3">
-            <div className={`h-10 w-10 rounded-lg ${c.bg} flex items-center justify-center shrink-0`}>
-              <Icon className={`h-5 w-5 ${c.color}`} />
+            className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4 shadow-sm flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className={`h-8 w-8 sm:h-10 sm:w-10 rounded-lg ${c.bg} flex items-center justify-center shrink-0`}>
+              <Icon className={`h-4 w-4 sm:h-5 sm:w-5 ${c.color}`} />
             </div>
-            <div>
-              <p className="text-xs text-slate-500">{c.label}</p>
-              <p className="text-lg font-bold text-slate-900">{c.value}</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] sm:text-xs text-slate-500 truncate">{c.label}</p>
+              <p className="text-sm sm:text-lg font-bold text-slate-900 truncate" title={c.value}>{c.value}</p>
             </div>
           </div>
         );
@@ -168,7 +168,7 @@ function InvoiceDetail({ invoice }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 const defaultFilters = {
   search: '', status: '', aging_bucket: '',
-  billing_month: getCurrentBillingMonth(), category: '',
+  billing_month: '', category: '',
 };
 
 export default function Invoices() {
@@ -416,8 +416,11 @@ export default function Invoices() {
         onClose={() => setGenOpen(false)}
         onSuccess={(msg, month) => { 
           showToast(msg); 
-          if (month) updateFilter('billing_month', month);
-          refetch(); 
+          if (month && filters.billing_month !== month) {
+            updateFilter('billing_month', month);
+          } else {
+            refetch();
+          }
         }}
       />
       <GenerateInvoiceModal
@@ -425,8 +428,11 @@ export default function Invoices() {
         onClose={() => setSingleGenOpen(false)}
         onSuccess={(msg, month) => { 
           showToast(msg); 
-          if (month) updateFilter('billing_month', month);
-          refetch(); 
+          if (month && filters.billing_month !== month) {
+            updateFilter('billing_month', month);
+          } else {
+            refetch();
+          }
         }}
       />
       {toast && (

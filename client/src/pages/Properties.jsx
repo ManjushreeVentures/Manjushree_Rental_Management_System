@@ -102,6 +102,7 @@ function PropertyDetails({ property, onUnitsChange, tenants = [], onViewAttachme
   const [showUnitForm, setShowUnitForm] = useState(false);
   const [unitForm, setUnitForm] = useState({ name: '', total_area: '', rent_amount: '' });
   const [savingUnit, setSavingUnit] = useState(false);
+  const [unitToDelete, setUnitToDelete] = useState(null);
 
   const fetchUnits = async () => {
     if (!property) return;
@@ -142,14 +143,16 @@ function PropertyDetails({ property, onUnitsChange, tenants = [], onViewAttachme
     }
   };
 
-  const handleDeleteUnit = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this unit?')) return;
+  const handleDeleteUnit = async () => {
+    if (!unitToDelete) return;
     try {
-      await unitApi.remove(id);
+      await unitApi.remove(unitToDelete);
       fetchUnits();
       if (onUnitsChange) onUnitsChange();
     } catch (e) {
       console.error(e);
+    } finally {
+      setUnitToDelete(null);
     }
   };
 
@@ -172,22 +175,22 @@ function PropertyDetails({ property, onUnitsChange, tenants = [], onViewAttachme
 
   return (
     <div className="space-y-6 max-h-[75vh] overflow-y-auto pr-2 custom-scrollbar">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <p className="text-[11px] sm:text-xs text-slate-500 mb-1">Property Name</p>
-          <p className="font-semibold text-slate-900">{property.name}</p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        <div className="col-span-1 sm:col-span-2 min-w-0">
+          <p className="text-[10px] sm:text-xs text-slate-500 mb-0.5">Property Name</p>
+          <p className="font-semibold text-slate-900 text-sm truncate" title={property.name}>{property.name}</p>
         </div>
-        <div>
-          <p className="text-[11px] sm:text-xs text-slate-500 mb-1">Status</p>
-          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20">Active</span>
+        <div className="col-span-1">
+          <p className="text-[10px] sm:text-xs text-slate-500 mb-0.5">Status</p>
+          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20">Active</span>
         </div>
-        <div className="sm:col-span-2">
-          <p className="text-[11px] sm:text-xs text-slate-500 mb-1">Address</p>
-          <p className="font-medium text-slate-900 text-sm">{property.address || '—'}</p>
+        <div className="col-span-2 sm:col-span-1 min-w-0">
+          <p className="text-[10px] sm:text-xs text-slate-500 mb-0.5">GSTIN</p>
+          <p className="font-medium text-slate-900 text-sm truncate" title={property.gstin}>{property.gstin || '—'}</p>
         </div>
-        <div className="sm:col-span-2">
-          <p className="text-[11px] sm:text-xs text-slate-500 mb-1">GSTIN</p>
-          <p className="font-medium text-slate-900 text-sm">{property.gstin || '—'}</p>
+        <div className="col-span-2 sm:col-span-4 min-w-0">
+          <p className="text-[10px] sm:text-xs text-slate-500 mb-0.5">Address</p>
+          <p className="font-medium text-slate-900 text-sm line-clamp-2">{property.address || '—'}</p>
         </div>
       </div>
 
@@ -208,26 +211,26 @@ function PropertyDetails({ property, onUnitsChange, tenants = [], onViewAttachme
         <div className="bg-slate-50 px-4 py-2 border-b border-slate-200">
           <h3 className="text-sm font-semibold text-slate-700">Area Details</h3>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-5 bg-white">
-          <div className="p-3 sm:p-4 border-b border-r sm:border-b-0 sm:border-r border-slate-200">
+        <div className="grid grid-cols-3 sm:grid-cols-5 bg-white">
+          <div className="p-2 sm:p-4 border-b border-r sm:border-b-0 sm:border-r border-slate-200">
             <p className="text-[10px] sm:text-xs text-slate-500 mb-1">Total</p>
-            <p className="font-medium text-slate-900 text-sm sm:text-base">{dynamicTotalArea ? Number(dynamicTotalArea).toLocaleString('en-IN') : '—'} sft</p>
+            <p className="font-medium text-slate-900 text-xs sm:text-base">{dynamicTotalArea ? Number(dynamicTotalArea).toLocaleString('en-IN') : '—'} sft</p>
           </div>
-          <div className="p-3 sm:p-4 border-b sm:border-b-0 sm:border-r border-slate-200">
+          <div className="p-2 sm:p-4 border-b border-r sm:border-b-0 sm:border-r border-slate-200">
             <p className="text-[10px] sm:text-xs text-emerald-700 font-medium mb-1">Leased</p>
-            <p className="font-medium text-slate-900 text-sm sm:text-base">{dynamicLeasedArea ? Number(dynamicLeasedArea).toLocaleString('en-IN') : '—'} sft</p>
+            <p className="font-medium text-slate-900 text-xs sm:text-base">{dynamicLeasedArea ? Number(dynamicLeasedArea).toLocaleString('en-IN') : '—'} sft</p>
           </div>
-          <div className="p-3 sm:p-4 border-b border-r sm:border-b-0 sm:border-r border-slate-200">
+          <div className="p-2 sm:p-4 border-b sm:border-b-0 sm:border-r border-slate-200">
             <p className="text-[10px] sm:text-xs text-orange-700 font-medium mb-1">Vacant</p>
-            <p className="font-medium text-slate-900 text-sm sm:text-base">{dynamicVacantArea ? Number(dynamicVacantArea).toLocaleString('en-IN') : '—'} sft</p>
+            <p className="font-medium text-slate-900 text-xs sm:text-base">{dynamicVacantArea ? Number(dynamicVacantArea).toLocaleString('en-IN') : '—'} sft</p>
           </div>
-          <div className="p-3 sm:p-4 border-b sm:border-b-0 sm:border-r border-slate-200 bg-orange-50/30">
+          <div className="p-2 sm:p-4 col-span-1 sm:col-span-1 border-r sm:border-r-0 border-slate-200 bg-orange-50/30">
             <p className="text-[10px] sm:text-xs text-orange-700 font-medium mb-1">Est. Vacant Rent</p>
-            <p className="font-bold text-orange-700 text-sm sm:text-base">{dynamicVacantArea ? '₹ ' + (Number(dynamicVacantArea) * 21).toLocaleString('en-IN') : '—'}</p>
+            <p className="font-bold text-orange-700 text-xs sm:text-base">{dynamicVacantArea ? '₹ ' + (Number(dynamicVacantArea) * 21).toLocaleString('en-IN') : '—'}</p>
           </div>
-          <div className="p-3 sm:p-4 col-span-2 sm:col-span-1 bg-teal-50/30">
+          <div className="p-2 sm:p-4 col-span-2 sm:col-span-1 bg-teal-50/30">
             <p className="text-[10px] sm:text-xs text-teal-700 font-medium mb-1">Rent Earned / Month</p>
-            <p className="font-bold text-teal-700 text-base sm:text-lg">{dynamicTotalAmount ? '₹ ' + Number(dynamicTotalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}</p>
+            <p className="font-bold text-teal-700 text-sm sm:text-lg">{dynamicTotalAmount ? '₹ ' + Number(dynamicTotalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}</p>
           </div>
         </div>
       </div>
@@ -244,17 +247,19 @@ function PropertyDetails({ property, onUnitsChange, tenants = [], onViewAttachme
         </div>
 
         {showUnitForm && (
-          <div className="p-4 border-b border-slate-200 bg-blue-50/50 flex flex-col sm:flex-row sm:items-end flex-wrap gap-3">
-            <div className="flex-1 w-full sm:w-auto">
-              <Input label="Block Name" placeholder="e.g. Block-4" value={unitForm.name} onChange={(e) => setUnitForm(f => ({ ...f, name: e.target.value }))} />
+          <div className="p-3 sm:p-4 border-b border-slate-200 bg-blue-50/50 flex flex-col sm:flex-row sm:items-end gap-3">
+            <div className="grid grid-cols-2 sm:flex flex-1 gap-3 w-full">
+              <div className="col-span-2 sm:flex-1 w-full sm:w-auto">
+                <Input label="Block Name" placeholder="e.g. Block-4" value={unitForm.name} onChange={(e) => setUnitForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div className="col-span-1 sm:w-24 w-full">
+                <Input label="Area (sft)" type="number" value={unitForm.total_area} onChange={(e) => setUnitForm(f => ({ ...f, total_area: e.target.value }))} />
+              </div>
+              <div className="col-span-1 sm:w-32 w-full">
+                <Input label="Est. Rent" type="number" value={unitForm.rent_amount} onChange={(e) => setUnitForm(f => ({ ...f, rent_amount: e.target.value }))} />
+              </div>
             </div>
-            <div className="w-full sm:w-24">
-              <Input label="Area (sft)" type="number" value={unitForm.total_area} onChange={(e) => setUnitForm(f => ({ ...f, total_area: e.target.value }))} />
-            </div>
-            <div className="w-full sm:w-32">
-              <Input label="Est. Rent" type="number" value={unitForm.rent_amount} onChange={(e) => setUnitForm(f => ({ ...f, rent_amount: e.target.value }))} />
-            </div>
-            <div className="flex gap-2 sm:pb-0.5 mt-2 sm:mt-0 w-full sm:w-auto">
+            <div className="flex gap-2 sm:pb-0.5 w-full sm:w-auto">
               <Button variant="primary" onClick={handleAddUnit} loading={savingUnit} className="flex-1 sm:flex-none">Save</Button>
               <Button variant="secondary" onClick={() => setShowUnitForm(false)} className="flex-1 sm:flex-none">Cancel</Button>
             </div>
@@ -304,7 +309,7 @@ function PropertyDetails({ property, onUnitsChange, tenants = [], onViewAttachme
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap text-sm text-slate-600 text-right">{u.rent_amount ? '₹ ' + Number(u.rent_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}</td>
                     <td className="px-4 py-2 whitespace-nowrap text-right">
-                      <button onClick={() => handleDeleteUnit(u.id)} className="text-red-400 hover:text-red-600 text-xs">Delete</button>
+                      <button onClick={() => setUnitToDelete(u.id)} className="text-red-400 hover:text-red-600 text-xs">Delete</button>
                     </td>
                   </tr>
                 ))}
@@ -313,6 +318,16 @@ function PropertyDetails({ property, onUnitsChange, tenants = [], onViewAttachme
           </div>
         )}
       </div>
+
+      <Modal open={!!unitToDelete} onClose={() => setUnitToDelete(null)} title="Delete Block/Unit" width="max-w-md">
+        <div className="p-4 space-y-4">
+          <p className="text-sm text-slate-600">Are you sure you want to delete this block/unit? This action cannot be undone.</p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setUnitToDelete(null)}>Cancel</Button>
+            <Button variant="danger" onClick={handleDeleteUnit}>Delete</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

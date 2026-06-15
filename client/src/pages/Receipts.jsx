@@ -46,28 +46,13 @@ function ReceiptKPIs({ stats }) {
   return (
     <div className="mb-6 space-y-3">
       {/* total */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">Total Collected</p>
-          <p className="text-2xl font-bold text-emerald-700 mt-1">
-            {formatCurrency(stats.total_collected)}
-          </p>
-          <p className="text-xs text-slate-400 mt-0.5">{stats.total_receipts} receipts</p>
-        </div>
-        {/* mode breakdown */}
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500 mb-2">By Payment Mode</p>
-          <div className="flex flex-wrap gap-2">
-            {modes.map((m) => (
-              stats[m.toLowerCase()] > 0 && (
-                <div key={m}
-                  className={`rounded-lg px-2.5 py-1.5 text-xs font-medium ${modeColors[m]}`}>
-                  {m}: {formatCurrency(stats[m.toLowerCase()])}
-                </div>
-              )
-            ))}
-          </div>
-        </div>
+      {/* total */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm min-w-0 max-w-sm">
+        <p className="text-xs sm:text-sm text-slate-500 truncate">Total Collected</p>
+        <p className="text-2xl sm:text-3xl font-bold text-emerald-700 mt-1 truncate" title={formatCurrency(stats.total_collected)}>
+          {formatCurrency(stats.total_collected)}
+        </p>
+        <p className="text-xs sm:text-sm text-slate-400 mt-1 truncate">{stats.total_receipts} receipts recorded</p>
       </div>
     </div>
   );
@@ -310,7 +295,7 @@ function RecordPaymentForm({ onSubmit, loading }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 const defaultFilters = {
-  search: '', payment_mode: '', billing_month: getCurrentBillingMonth(), category: '',
+  search: '', payment_mode: '', billing_month: '', category: '',
   date_from: '', date_to: '',
 };
 
@@ -329,10 +314,11 @@ export default function Receipts() {
 
   const { data: statsData, refetch: refetchStats } = useAsync(
     () => receiptApi.getStats({
-      date_from: filters.date_from || undefined,
-      date_to:   filters.date_to   || undefined,
+      date_from:     filters.date_from     || undefined,
+      date_to:       filters.date_to       || undefined,
+      billing_month: filters.billing_month || undefined,
     }),
-    [filters.date_from, filters.date_to]
+    [filters.date_from, filters.date_to, filters.billing_month]
   );
 
   const { data: monthsData } = useAsync(
