@@ -133,7 +133,7 @@ function KPICards({ kpis, onNavigate }) {
     {
       label: 'Annual Rent Roll',
       value: formatCurrency(kpis.annual_rent_roll),
-      sub: 'Annualized rent of active leases',
+      sub: 'Rent & CAM — current FY',
       icon: TrendingUp,
       iconBg: 'bg-slate-100',
       iconCls: 'text-slate-600',
