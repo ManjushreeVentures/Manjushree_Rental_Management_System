@@ -8,7 +8,8 @@ import {
   updateInvoice,
   generateInvoices,
   bulkGenerateInvoices,
-  sendOverdueReminders
+  sendOverdueReminders,
+  deleteInvoice
 } from '../controllers/invoice.controller.js';
 import { validate } from '../middleware/validate.js';
 import { invoiceSchema } from '../models/invoice.model.js';
@@ -21,6 +22,7 @@ router.get('/', getAllInvoices);
 router.get('/:id', getInvoiceById);
 router.post('/', validate(invoiceSchema), createInvoice);
 router.put('/:id', validate(invoiceSchema.partial()), updateInvoice);
+router.delete('/:id', deleteInvoice);
 router.post('/generate', generateInvoices);
 router.post('/bulk-generate', bulkGenerateInvoices);
 router.post('/send-reminders', sendOverdueReminders);

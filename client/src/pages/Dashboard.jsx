@@ -133,7 +133,7 @@ function KPICards({ kpis, onNavigate }) {
     {
       label: 'Annual Rent Roll',
       value: formatCurrency(kpis.annual_rent_roll),
-      sub: 'Rent & CAM — current FY',
+      sub: 'Annualized rent of active leases',
       icon: TrendingUp,
       iconBg: 'bg-slate-100',
       iconCls: 'text-slate-600',
@@ -457,8 +457,8 @@ function AlertsPanel({ alerts, onNavigate }) {
                   )}
                 </p>
               )}
-              {item.overdue_days && (
-                <p className="text-xs text-slate-500">{item.overdue_days}d overdue</p>
+              {(item.overdue_days || item.overdue_by_days) && (
+                <p className="text-xs text-slate-500">{item.overdue_days || item.overdue_by_days}d overdue</p>
               )}
               {item.days_left !== undefined && (
                 <p className={`text-xs font-medium

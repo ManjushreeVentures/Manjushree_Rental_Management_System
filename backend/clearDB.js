@@ -1,16 +1,20 @@
 import pool from './src/config/db.js';
 
 async function clearDatabase() {
-  try {
-    console.log('🗑️ Clearing database...');
-    // Drop all data but keep the tables
-    await pool.query('TRUNCATE TABLE properties, units, tenants, invoices, receipts, excel_uploads, tenant_categories CASCADE;');
-    console.log('✅ Database completely cleared!');
-    process.exit(0);
-  } catch (err) {
-    console.error('❌ Error clearing database:', err);
-    process.exit(1);
+  console.log('🗑️ Clearing database...');
+  const tables = ['tenant_categories', 'receipts', 'invoices', 'units', 'tenants', 'excel_uploads', 'properties'];
+  
+  for (const table of tables) {
+    try {
+      await pool.query(`TRUNCATE TABLE ${table} CASCADE;`);
+      console.log(`✅ Cleared ${table}`);
+    } catch (err) {
+      console.warn(`⚠️ Could not clear ${table}: ${err.message}`);
+    }
   }
+  
+  console.log('✅ Database clearing process finished!');
+  process.exit(0);
 }
 
 clearDatabase();

@@ -29,7 +29,7 @@ export async function outstandingReport(req, res) {
   let where    = `WHERE i.outstanding_balance > 0`;
 
   if (property_name) { params.push(property_name); where += ` AND i.property_name = $${params.length}`; }
-  if (aging_bucket)  { params.push(aging_bucket);  where += ` AND i.aging_bucket  = $${params.length}`; }
+  if (aging_bucket)  { params.push(aging_bucket);  where += ` AND compute_aging_bucket(i.due_date, i.amount_collected, i.bill_amount) = $${params.length}`; }
 
   const { rows } = await pool.query(
     `SELECT
@@ -46,7 +46,7 @@ export async function outstandingReport(req, res) {
        i.amount_collected  AS "Amount Collected",
        i.outstanding_balance AS "Outstanding Balance",
        i.overdue_by_days   AS "Overdue By Days",
-       i.aging_bucket      AS "Aging Bucket",
+       compute_aging_bucket(i.due_date, i.amount_collected, i.bill_amount) AS "Aging Bucket",
        i.status            AS "Status"
      FROM invoices i
      LEFT JOIN tenants t ON t.id = i.tenant_id

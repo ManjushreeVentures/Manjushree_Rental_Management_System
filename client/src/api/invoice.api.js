@@ -10,4 +10,5 @@ export const invoiceApi = {
   generate:       (data)   => client.post('/invoices/generate', data),
   bulkGenerate:   (data)   => client.post('/invoices/bulk-generate', data),
   sendReminders:  (data)   => client.post('/invoices/send-reminders', data),
+  delete:         (id)     => client.delete(`/invoices/${id}`),
 };

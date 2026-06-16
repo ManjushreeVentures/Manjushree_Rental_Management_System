@@ -224,10 +224,27 @@ export async function uploadExcel(req, res) {
       // ── Step 3: insert invoices ───────────────────────────────────────────
       let imported      = 0;
       let receiptsCreated = 0;
+      let duplicatesSkipped = 0;
 
       for (const row of rows) {
         const propertyId = propMap[row.property_name]   ?? null;
         const tenantId   = tenantMap[`${row.tenant_name}|||${row.property_name}`] ?? null;
+
+        // Skip if invoice already exists for this tenant, month, category, date, and amount
+        if (tenantId && row.billing_month && row.category) {
+          const existing = await client.query(
+            `SELECT id FROM invoices WHERE tenant_id = $1 AND billing_month = $2 AND category = $3 AND bill_date = $4 AND bill_amount = $5`,
+            [tenantId, row.billing_month, row.category, row.bill_date, row.bill_amount]
+          );
+          if (existing.rows.length > 0) {
+            duplicatesSkipped++;
+            skipped.push({
+              row: `Tenant: ${row.tenant_name}`,
+              reason: `Duplicate invoice skipped (${row.category} for ${row.billing_month}, Amount: ${row.bill_amount})`
+            });
+            continue;
+          }
+        }
 
         const invRes = await client.query(
           `INSERT INTO invoices
@@ -313,11 +330,12 @@ export async function uploadExcel(req, res) {
 
       res.json({
         success: true,
-        message: `${imported} invoices imported · ${receiptsCreated} receipts created · properties & tenants auto-created`,
+        message: `${imported} invoices imported · ${duplicatesSkipped} duplicates skipped · properties & tenants auto-created`,
         data: {
           batchId,
           imported,
           receiptsCreated,
+          duplicatesSkipped,
           skipped:        skipped.length,
           skippedDetails: skipped,
         },

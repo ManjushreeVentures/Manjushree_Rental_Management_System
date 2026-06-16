@@ -35,20 +35,16 @@ export async function getKPIs() {
          COALESCE(SUM(outstanding_balance)
            FILTER (WHERE status <> 'Paid'), 0) AS total_outstanding,
          -- overdue > 30 days
-        COALESCE(SUM(outstanding_balance)
-          FILTER (WHERE (CURRENT_DATE - due_date) > 30 AND status <> 'Paid'), 0) AS overdue_30_plus,
-         -- annual rent roll (Rent & CAM, current FYTD starting April 1st)
-         COALESCE(SUM(amount_collected)
-           FILTER (WHERE category ILIKE '%rent%'
-             AND bill_date >= date_trunc('year', CURRENT_DATE - INTERVAL '3 months') + INTERVAL '3 months'
-           ), 0) AS annual_rent_roll
+         COALESCE(SUM(outstanding_balance)
+           FILTER (WHERE (CURRENT_DATE - due_date) > 30 AND status <> 'Paid'), 0) AS overdue_30_plus
        FROM invoices`,
       [targetM, targetY]
     ),
     pool.query(
       `SELECT
          COUNT(*) AS total_tenants,
-         COUNT(*) FILTER (WHERE is_active = TRUE) AS active_tenants
+         COUNT(*) FILTER (WHERE is_active = TRUE) AS active_tenants,
+         COALESCE(SUM(monthly_rent * 12) FILTER (WHERE is_active = TRUE), 0) AS annual_rent_roll
        FROM tenants`
     ),
     pool.query(
@@ -75,7 +71,7 @@ export async function getKPIs() {
     total_outstanding:  parseFloat(kpi.total_outstanding),
     overdue_30_plus:    parseFloat(kpi.overdue_30_plus),
     occupancy_rate:     occupancy,
-    annual_rent_roll:   parseFloat(kpi.annual_rent_roll),
+    annual_rent_roll:   parseFloat(occ.annual_rent_roll),
     total_tenants:      parseInt(occ.total_tenants),
     active_tenants:     activeTen,
     total_units:        units,

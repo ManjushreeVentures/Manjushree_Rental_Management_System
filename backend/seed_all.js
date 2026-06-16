@@ -12,7 +12,7 @@ const seedData = [
       { unitName: 'Block-4', tenantName: 'Britannia', area: 34034, isVacant: false, rent: 872308.44 },
       { unitName: 'Block-3', tenantName: null, area: 27041, isVacant: true, rent: 0 },
       { unitName: 'Block-2', tenantName: null, area: 26402, isVacant: true, rent: 0 },
-      { unitName: 'BLOCK-1', tenantName: 'Marelli Motherson', area: 24322, isVacant: false, rent: 531546.12 }
+      { unitName: 'BLOCK-1', tenantName: 'Marelli Motherson', area: 24322, isVacant: false, rent: 646015 }
     ]
   },
   {
@@ -22,11 +22,13 @@ const seedData = [
     vacant_area: 68643.00,
     total_amount: 2181848.78,
     units: [
-      { unitName: 'GF Block-A', tenantName: 'Asahidenso Multilink Pvt Ltd', area: 19952, isVacant: false, rent: 813012.08 },
+      { unitName: 'GF Block-A', tenantName: 'Asahidenso Multilink Pvt Ltd', area: 19952, isVacant: false, rent: 2574501 },
       { unitName: 'GF Block-B', tenantName: null, area: 18878, isVacant: true, rent: 0 },
       { unitName: 'FF', tenantName: null, area: 19162, isVacant: true, rent: 0 },
       { unitName: 'SF', tenantName: null, area: 30603, isVacant: true, rent: 0 },
-      { unitName: 'TF', tenantName: 'Asahidenso Multilink Pvt Ltd', area: 37709, isVacant: false, rent: 1368836.70 }
+      { unitName: 'TF', tenantName: 'Asahidenso Multilink Pvt Ltd', area: 37709, isVacant: false, rent: 0 },
+      { unitName: 'Manjushree Venture Unit', tenantName: 'Manjushree Venture LLP', area: 0, isVacant: false, rent: 2596 },
+      { unitName: 'Caremont Medtech Unit', tenantName: 'Caremont Medtech Pvt Ltd', area: 0, isVacant: false, rent: 10384 }
     ]
   },
   {
@@ -36,8 +38,9 @@ const seedData = [
     vacant_area: 0,
     total_amount: 1943531.76,
     units: [
-      { unitName: 'MTL Unit', tenantName: 'Alternicq Limited', area: 65111, isVacant: false, rent: 1582848.36 },
-      { unitName: 'Packetek Unit', tenantName: 'Manjushree Packtek Private Limited', area: 15614, isVacant: false, rent: 360683.40 }
+      { unitName: 'MTL Unit', tenantName: 'Alternicq Limited', area: 65111, isVacant: false, rent: 1947516.83 },
+      { unitName: 'Packetek Unit', tenantName: 'Manjushree Packtek Private Limited', area: 15614, isVacant: false, rent: 425606 },
+      { unitName: 'Manjushree Venture Unit', tenantName: 'Manjushree Venture LLP', area: 0, isVacant: false, rent: 5900 }
     ]
   },
   {
@@ -47,17 +50,17 @@ const seedData = [
     vacant_area: 35016,
     total_amount: 1901877.08,
     units: [
-      { unitName: 'B-1', tenantName: 'Elins Switch Boards Pvt Ltd', area: 15467, isVacant: false, rent: 337636.88 },
-      { unitName: 'B-2 GF', tenantName: 'Bio Labs and Life Science', area: 4234, isVacant: false, rent: 97339.66 },
-      { unitName: 'B-2 FF', tenantName: 'Amazon Retailer India Pvt Ltd', area: 3849, isVacant: false, rent: 84021.75 },
-      { unitName: 'B-3', tenantName: 'Amazon Seller Services Pvt Ltd', area: 5792, isVacant: false, rent: 168581.95 },
-      { unitName: 'Parking', tenantName: 'Amazon Seller Services Pvt Ltd', area: 2000, isVacant: false, rent: 17640.00 },
-      { unitName: 'B-4 GF', tenantName: 'Punarvi Crystals', area: 7517, isVacant: false, rent: 207469.20 },
+      { unitName: 'B-1', tenantName: 'Elins Switch Boards Pvt Ltd', area: 15467, isVacant: false, rent: 416548 },
+      { unitName: 'B-2 GF', tenantName: 'Bio Labs and Life Science', area: 4234, isVacant: false, rent: 120612 },
+      { unitName: 'B-2 FF', tenantName: 'Amazon Retailer India Pvt Ltd', area: 3849, isVacant: false, rent: 268232 },
+      { unitName: 'B-3', tenantName: 'Amazon Seller Services Pvt Ltd', area: 5792, isVacant: false, rent: 50680 },
+      { unitName: 'Parking', tenantName: 'Amazon Seller Services Pvt Ltd', area: 2000, isVacant: false, rent: 0 },
+      { unitName: 'B-4 GF', tenantName: 'Punarvi Industries', area: 7517, isVacant: false, rent: 244813 },
       { unitName: 'B-5', tenantName: null, area: 26116, isVacant: true, rent: 0 },
-      { unitName: 'Basement B-6', tenantName: 'SKR Traders', area: 4745, isVacant: false, rent: 142492.35 },
-      { unitName: 'B-6 GF', tenantName: 'Orion', area: 8385, isVacant: false, rent: 212140.50 },
-      { unitName: 'B-6', tenantName: 'Winnercom Technologies Pvt Ltd', area: 17300, isVacant: false, rent: 437690.00 },
-      { unitName: 'B5', tenantName: 'Agrileaf Exports Private Limited', area: 7457, isVacant: false, rent: 196864.80 },
+      { unitName: 'Basement B-6', tenantName: 'SKR Traders', area: 4745, isVacant: false, rent: 176548 },
+      { unitName: 'B-6 GF', tenantName: 'Orion Apparel Trim Pvt Ltd', area: 8385, isVacant: false, rent: 262842 },
+      { unitName: 'B-6', tenantName: 'Winnercom Sandhar Technologies Pvt Ltd', area: 17300, isVacant: false, rent: 516474 },
+      { unitName: 'B5', tenantName: 'Agrileaf Exports Private Limited', area: 7457, isVacant: false, rent: 211182 },
       { unitName: 'B_6', tenantName: null, area: 8900, isVacant: true, rent: 0 }
     ]
   },
@@ -68,7 +71,7 @@ const seedData = [
     vacant_area: 0,
     total_amount: 1194129.30,
     units: [
-      { unitName: 'JPPL Block', tenantName: 'British Enginees', area: 43741, isVacant: false, rent: 1194129.30 }
+      { unitName: 'JPPL Block', tenantName: 'British Engines', area: 43741, isVacant: false, rent: 1409073 }
     ]
   },
   {

@@ -21,7 +21,7 @@ ON CONFLICT (email) DO NOTHING;
 -- 3. PROPERTIES TABLE
 CREATE TABLE IF NOT EXISTS properties (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name TEXT NOT NULL,
+  name TEXT UNIQUE NOT NULL,
   address TEXT,
   city TEXT,
   total_units INTEGER DEFAULT 0,
@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   outstanding_balance NUMERIC(14,2) DEFAULT 0,
   overdue_by_days INTEGER DEFAULT 0,
   aging_bucket TEXT DEFAULT 'Current',
+  upload_batch_id UUID,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -105,6 +106,8 @@ CREATE TABLE IF NOT EXISTS invoices (
 CREATE TABLE IF NOT EXISTS receipts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   invoice_id UUID REFERENCES invoices(id) ON DELETE CASCADE,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE SET NULL,
+  property_id UUID REFERENCES properties(id) ON DELETE SET NULL,
   amount NUMERIC(14,2) NOT NULL,
   payment_date DATE NOT NULL,
   payment_mode TEXT NOT NULL,
@@ -125,6 +128,28 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 9. EXCEL UPLOADS TABLE
+CREATE TABLE IF NOT EXISTS excel_uploads (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  filename TEXT NOT NULL,
+  status TEXT DEFAULT 'processing',
+  rows_imported INTEGER DEFAULT 0,
+  rows_skipped INTEGER DEFAULT 0,
+  error_log JSONB,
+  uploaded_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 10. TENANT CATEGORIES TABLE
+CREATE TABLE IF NOT EXISTS tenant_categories (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+  category TEXT NOT NULL,
+  amount NUMERIC(14,2) DEFAULT 0,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 9. PERFORMANCE INDEXES
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant_id ON invoices(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_property_id ON invoices(property_id);
@@ -133,3 +158,36 @@ CREATE INDEX IF NOT EXISTS idx_invoices_bill_date ON invoices(bill_date);
 CREATE INDEX IF NOT EXISTS idx_receipts_invoice_id ON receipts(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_units_property_id ON units(property_id);
 CREATE INDEX IF NOT EXISTS idx_tenants_property_id ON tenants(property_id);
+
+-- 10. DATABASE FUNCTIONS
+CREATE OR REPLACE FUNCTION compute_aging_bucket(
+  due_date DATE,
+  amount_collected NUMERIC,
+  bill_amount NUMERIC
+) RETURNS TEXT AS $$
+DECLARE
+  days_overdue INT;
+BEGIN
+  IF amount_collected >= bill_amount THEN
+    RETURN 'Current';
+  END IF;
+
+  IF due_date IS NULL THEN
+    RETURN 'Current';
+  END IF;
+
+  days_overdue := CURRENT_DATE - due_date;
+
+  IF days_overdue <= 0 THEN
+    RETURN 'Current';
+  ELSIF days_overdue <= 30 THEN
+    RETURN '1-30 Days';
+  ELSIF days_overdue <= 60 THEN
+    RETURN '31-60 Days';
+  ELSIF days_overdue <= 90 THEN
+    RETURN '61-90 Days';
+  ELSE
+    RETURN '90+ Days';
+  END IF;
+END;
+$$ LANGUAGE plpgsql;

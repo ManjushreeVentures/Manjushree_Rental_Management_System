@@ -15,6 +15,7 @@ import FilterBar    from '../components/ui/FilterBar';
 import { useAsync } from '../hooks/useAsync';
 import { receivableApi } from '../api/receivable.api';
 import { formatCurrency, formatDate, formatBillingMonth } from '../utils/format';
+import ConfirmModal from '../components/ui/ConfirmModal';
 
 const AGING_BUCKETS = ['Current', '1-30 Days', '31-60 Days', '61-90 Days', '90+ Days'];
 
@@ -318,6 +319,7 @@ function TenantDrilldown({ data, loading, tenantName }) {
   const [sending, setSending] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
   const [localEmail, setLocalEmail] = useState('');
+  const [confirmConfig, setConfirmConfig] = useState(null);
 
   // Update localEmail when data loads
   useEffect(() => {
@@ -355,6 +357,16 @@ function TenantDrilldown({ data, loading, tenantName }) {
 
   return (
     <div className="space-y-5">
+      {confirmConfig && (
+        <ConfirmModal
+          open={!!confirmConfig}
+          onClose={() => setConfirmConfig(null)}
+          title={confirmConfig.title}
+          message={confirmConfig.message}
+          onConfirm={confirmConfig.onConfirm}
+        />
+      )}
+
       {/* Action Bar */}
       <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
         <div className="flex-1">
@@ -393,9 +405,11 @@ function TenantDrilldown({ data, loading, tenantName }) {
               variant="danger" 
               loading={sending} 
               onClick={() => {
-                if (window.confirm(`Send an email reminder to ${tenantName} (${localEmail})?`)) {
-                  handleSendReminder(localEmail);
-                }
+                setConfirmConfig({
+                  title: 'Confirm Send',
+                  message: `Send an email reminder to ${tenantName} (${localEmail})?`,
+                  onConfirm: () => handleSendReminder(localEmail)
+                });
               }}
             >
               <Mail className="h-4 w-4" /> Send Reminder Email

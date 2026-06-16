@@ -25,7 +25,10 @@ export async function getAllInvoices(req, res) {
                  OR i.category ILIKE $${params.length})`;
   }
   if (status) add('i.status = ?', status);
-  if (aging_bucket) add('i.aging_bucket = ?', aging_bucket);
+  if (aging_bucket) {
+    params.push(aging_bucket);
+    where += ` AND compute_aging_bucket(i.due_date, i.amount_collected, i.bill_amount) = $${params.length}`;
+  }
   if (billing_month) add('i.billing_month = ?', billing_month);
   if (property_name) add('i.property_name = ?', property_name);
   if (tenant_name) add('i.tenant_name = ?', tenant_name);
@@ -34,6 +37,7 @@ export async function getAllInvoices(req, res) {
   const dataQuery = `
     SELECT
       i.*,
+      compute_aging_bucket(i.due_date, i.amount_collected, i.bill_amount) AS aging_bucket,
       p.city          AS property_city,
       t.unit_no       AS tenant_unit,
       t.phone         AS tenant_phone
@@ -122,15 +126,15 @@ export async function getInvoiceStats(req, res) {
        COUNT(*) FILTER (WHERE status = 'Pending')         AS pending_count,
        COUNT(*) FILTER (WHERE status = 'Partial')         AS partial_count,
        COALESCE(SUM(outstanding_balance)
-         FILTER (WHERE aging_bucket = 'Current'),    0)   AS aging_current,
+         FILTER (WHERE compute_aging_bucket(due_date, amount_collected, bill_amount) = 'Current'),    0)   AS aging_current,
        COALESCE(SUM(outstanding_balance)
-         FILTER (WHERE aging_bucket = '1-30 Days'),  0)   AS aging_1_30,
+         FILTER (WHERE compute_aging_bucket(due_date, amount_collected, bill_amount) = '1-30 Days'),  0)   AS aging_1_30,
        COALESCE(SUM(outstanding_balance)
-         FILTER (WHERE aging_bucket = '31-60 Days'), 0)   AS aging_31_60,
+         FILTER (WHERE compute_aging_bucket(due_date, amount_collected, bill_amount) = '31-60 Days'), 0)   AS aging_31_60,
        COALESCE(SUM(outstanding_balance)
-         FILTER (WHERE aging_bucket = '61-90 Days'), 0)   AS aging_61_90,
+         FILTER (WHERE compute_aging_bucket(due_date, amount_collected, bill_amount) = '61-90 Days'), 0)   AS aging_61_90,
        COALESCE(SUM(outstanding_balance)
-         FILTER (WHERE aging_bucket = '90+ Days'),   0)   AS aging_90_plus
+         FILTER (WHERE compute_aging_bucket(due_date, amount_collected, bill_amount) = '90+ Days'),   0)   AS aging_90_plus
      FROM invoices ${where}`,
     params
   );
@@ -293,7 +297,7 @@ export async function generateInvoices(req, res) {
     }
 
     const catName = String(cat.category || 'Rent').toLowerCase();
-    const creditDays = (catName.includes('power') || catName.includes('water')) ? 7 : 45;
+    const creditDays = (catName.includes('power') || catName.includes('water')) ? 7 : 31;
     const dueDate = new Date(billDate);
     dueDate.setDate(dueDate.getDate() + creditDays);
 
@@ -429,7 +433,7 @@ export async function bulkGenerateInvoices(req, res) {
     }
 
     const catName = String(category).toLowerCase();
-    const creditDays = (catName.includes('power') || catName.includes('water')) ? 7 : 45;
+    const creditDays = (catName.includes('power') || catName.includes('water')) ? 7 : 31;
     const dueDate = new Date(bill_date);
     dueDate.setDate(dueDate.getDate() + creditDays);
 
@@ -557,5 +561,31 @@ export async function sendOverdueReminders(req, res) {
   } catch (error) {
     console.error('Error sending reminders:', error);
     res.status(500).json({ success: false, message: 'Internal server error while sending reminders' });
+  }
+}
+
+// ─── DELETE /invoices/:id ─────────────────────────────────────────────────────
+export async function deleteInvoice(req, res) {
+  try {
+    const { id } = req.params;
+    
+    // Check if invoice exists and get its status
+    const existing = await pool.query('SELECT status FROM invoices WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+    
+    // Ensure receipts are deleted/handled? (CASCADE is on receipts)
+    const { rows } = await pool.query('DELETE FROM invoices WHERE id = $1 RETURNING *', [id]);
+    
+    if (rows.length > 0) {
+      await logAudit(req.user, 'DELETE', 'INVOICE', id, { deleted_invoice: rows[0] });
+      return res.json({ success: true, message: 'Invoice deleted successfully' });
+    }
+    
+    return res.status(400).json({ success: false, message: 'Failed to delete invoice' });
+  } catch (error) {
+    console.error('Error deleting invoice:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
   }
 }

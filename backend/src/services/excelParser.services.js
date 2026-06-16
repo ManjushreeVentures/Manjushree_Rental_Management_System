@@ -20,28 +20,46 @@ const COL_MAP = {
 // ================== HELPER FUNCTIONS ==================
 function parseExcelDate(value) {
   if (!value) return null;
-  if (value instanceof Date) return value.toISOString().split('T')[0];
 
   if (typeof value === 'number') {
-    const date = new Date((value - 25569) * 86400 * 1000);
-    return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
+    // Excel epoch is Jan 1, 1900. Jan 1, 1970 is 25569.
+    const msSince1970 = (value - 25569) * 86400 * 1000;
+    // Math.round to handle any floating point imprecision
+    const date = new Date(Math.round(msSince1970));
+    return date.toISOString().split('T')[0];
   }
 
-  const date = new Date(value);
-  return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
+  const strValue = String(value).trim();
+  const date = new Date(strValue);
+  if (isNaN(date.getTime())) return null;
+  
+  // For strings, parsing as local time is safest, then extract local components
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function formatBillingMonth(value) {
   if (!value) return '';
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   
-  if (value instanceof Date) {
-    return `${months[value.getMonth()]}-${value.getFullYear()}`;
+  if (typeof value === 'number') {
+    const msSince1970 = (value - 25569) * 86400 * 1000;
+    const date = new Date(Math.round(msSince1970));
+    return `${months[date.getUTCMonth()]}-${date.getUTCFullYear()}`;
   }
 
   const strValue = String(value).trim();
+  
+  // If it's already in format MMM-YYYY (e.g. Jun-2026), just return it
+  if (/^[A-Z][a-z]{2}-\d{4}$/.test(strValue)) {
+    return strValue;
+  }
+
   const dateObj = new Date(strValue);
   if (!isNaN(dateObj.getTime()) && strValue.length > 15) {
+    // Use local methods for string parsed dates
     return `${months[dateObj.getMonth()]}-${dateObj.getFullYear()}`;
   }
   
@@ -81,13 +99,18 @@ function normalizeStatus(status) {
 }
 
 function normalizeAgingBucket(bucket) {
-  return bucket ? String(bucket).trim() : 'Current';
+  if (!bucket) return 'Current';
+  const b = String(bucket).trim();
+  if (b.toLowerCase() === 'due') return 'Current';
+  return b;
 }
 
 // ================== MAIN PARSER ==================
 export function parseExcelBuffer(buffer) {
   try {
-    const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+    // Do NOT use cellDates: true! It creates timezone-shifted Date objects.
+    // Reading dates as raw numbers guarantees 100% precision.
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
 
@@ -168,11 +191,16 @@ export function parseExcelBuffer(buffer) {
 
       const parsedCategory = String(mapped.category || 'Rent').trim();
       const catLower = parsedCategory.toLowerCase();
-      const creditDays = (catLower.includes('power') || catLower.includes('water')) ? 7 : 45;
+      const creditDays = (catLower.includes('power') || catLower.includes('water')) ? 7 : 31;
       
       const parsedBillDate = parseExcelDate(mapped.bill_date) || new Date().toISOString().split('T')[0];
       const computedDueDate = new Date(parsedBillDate);
-      computedDueDate.setDate(computedDueDate.getDate() + creditDays);
+      computedDueDate.setUTCDate(computedDueDate.getUTCDate() + creditDays);
+      
+      let finalDueDate = computedDueDate.toISOString().split('T')[0];
+      if (mapped.due_date) {
+        finalDueDate = parseExcelDate(mapped.due_date) || finalDueDate;
+      }
 
       rows.push({
         property_name: String(mapped.property_name).trim(),
@@ -182,7 +210,7 @@ export function parseExcelBuffer(buffer) {
         bill_amount: billAmount,
         billing_month: formatBillingMonth(mapped.billing_month),
         credit_terms_days: creditDays,
-        due_date: computedDueDate.toISOString().split('T')[0],
+        due_date: finalDueDate,
         status: normalizeStatus(mapped.status),
         amount_collected: parseNumber(mapped.amount_collected) || 0,
         outstanding_balance: parseNumber(mapped.outstanding_balance) || 0,

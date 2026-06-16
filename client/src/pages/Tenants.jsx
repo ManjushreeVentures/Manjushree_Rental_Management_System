@@ -15,6 +15,7 @@ import { tenantApi } from '../api/tenant.api';
 import { propertyApi } from '../api/property.api';
 import { formatCurrency, formatDate } from '../utils/format';
 import PinModal from '../components/PinModal';
+import ConfirmModal from '../components/ui/ConfirmModal';
 
 // ─── Escalation status badge ──────────────────────────────────────────────────
 const escalationStyles = {
@@ -419,6 +420,7 @@ export default function Tenants() {
   const [applyingId, setApplyingId] = useState(null);
   const [toast, setToast] = useState(null);
   const [pinModalFile, setPinModalFile] = useState(null);
+  const [confirmConfig, setConfirmConfig] = useState(null);
 
   const { data, loading, error, refetch } = useAsync(
     () => tenantApi.getAll({
@@ -506,25 +508,38 @@ export default function Tenants() {
     finally { setSaving(false); }
   };
 
-  const handleDeactivate = async (id) => {
-    if (!confirm('Deactivate this tenant?')) return;
-    try {
-      await tenantApi.remove(id);
-      showToast('Tenant deactivated');
-      refetch();
-    } catch (e) { showToast(e.message, 'error'); }
+  const handleDeactivate = (id) => {
+    setConfirmConfig({
+      title: 'Deactivate Tenant',
+      message: 'Are you sure you want to deactivate this tenant?',
+      confirmVariant: 'danger',
+      confirmText: 'Deactivate',
+      onConfirm: async () => {
+        try {
+          await tenantApi.remove(id);
+          showToast('Tenant deactivated');
+          refetch();
+        } catch (e) { showToast(e.message, 'error'); }
+      }
+    });
   };
 
-  const handleApplyEscalation = async (id, name) => {
-    if (!confirm(`Apply escalation for ${name}? This will update monthly rent.`)) return;
-    setApplyingId(id);
-    try {
-      await tenantApi.applyEscalation(id);
-      showToast(`Escalation applied for ${name}`);
-      refetch();
-      refetchEscal();
-    } catch (e) { showToast(e.message, 'error'); }
-    finally { setApplyingId(null); }
+  const handleApplyEscalation = (id, name) => {
+    setConfirmConfig({
+      title: 'Apply Escalation',
+      message: `Apply escalation for ${name}? This will update their monthly rent.`,
+      confirmText: 'Apply',
+      onConfirm: async () => {
+        setApplyingId(id);
+        try {
+          await tenantApi.applyEscalation(id);
+          showToast(`Escalation applied for ${name}`);
+          refetch();
+          refetchEscal();
+        } catch (e) { showToast(e.message, 'error'); }
+        finally { setApplyingId(null); }
+      }
+    });
   };
 
   const expiringSoon = tenants.filter((t) => t.lease_status === 'Expiring Soon').length;
@@ -883,6 +898,18 @@ export default function Tenants() {
 
       {pinModalFile && (
         <PinModal filename={pinModalFile} onClose={() => setPinModalFile(null)} />
+      )}
+
+      {confirmConfig && (
+        <ConfirmModal
+          open={!!confirmConfig}
+          onClose={() => setConfirmConfig(null)}
+          title={confirmConfig.title}
+          message={confirmConfig.message}
+          onConfirm={confirmConfig.onConfirm}
+          confirmText={confirmConfig.confirmText}
+          confirmVariant={confirmConfig.confirmVariant}
+        />
       )}
     </div>
   );

@@ -18,6 +18,7 @@ import { receiptApi }  from '../api/receipt.api';
 import { invoiceApi }  from '../api/invoice.api';
 import { formatCurrency, formatDate, formatBillingMonth, getCurrentBillingMonth } from '../utils/format';
 import PinModal from '../components/PinModal';
+import ConfirmModal from '../components/ui/ConfirmModal';
 
 const PAYMENT_MODES = ['NEFT', 'RTGS', 'Cheque', 'UPI', 'Cash', 'Other'];
 
@@ -306,6 +307,7 @@ export default function Receipts() {
   const [saving,    setSaving]    = useState(false);
   const [toast,     setToast]     = useState(null);
   const [pinModalFile, setPinModalFile] = useState(null);
+  const [confirmConfig, setConfirmConfig] = useState(null);
 
   const { data, loading, error, refetch } = useAsync(
     () => receiptApi.getAll({ ...filters, page, limit: 50 }),
@@ -353,16 +355,23 @@ export default function Receipts() {
     } finally { setSaving(false); }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Delete this receipt? Invoice balance will be restored.')) return;
-    try {
-      await receiptApi.remove(id);
-      showToast('Receipt deleted, balance restored');
-      refetch();
-      refetchStats();
-    } catch (e) {
-      showToast(e.message, 'error');
-    }
+  const handleDelete = (id) => {
+    setConfirmConfig({
+      title: 'Delete Receipt',
+      message: 'Delete this receipt? The invoice balance will be restored.',
+      confirmVariant: 'danger',
+      confirmText: 'Delete',
+      onConfirm: async () => {
+        try {
+          await receiptApi.remove(id);
+          showToast('Receipt deleted, balance restored');
+          refetch();
+          refetchStats();
+        } catch (e) {
+          showToast(e.message, 'error');
+        }
+      }
+    });
   };
 
   const filterConfig = [
@@ -547,13 +556,24 @@ export default function Receipts() {
         <PinModal filename={pinModalFile} onClose={() => setPinModalFile(null)} />
       )}
 
-      {/* Toast */}
       {toast && (
         <div className={`fixed bottom-6 right-6 z-50 rounded-xl px-4 py-3
           text-sm font-medium shadow-lg
           ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
           {toast.msg}
         </div>
+      )}
+
+      {confirmConfig && (
+        <ConfirmModal
+          open={!!confirmConfig}
+          onClose={() => setConfirmConfig(null)}
+          title={confirmConfig.title}
+          message={confirmConfig.message}
+          onConfirm={confirmConfig.onConfirm}
+          confirmText={confirmConfig.confirmText}
+          confirmVariant={confirmConfig.confirmVariant}
+        />
       )}
     </div>
   );

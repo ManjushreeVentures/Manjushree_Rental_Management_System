@@ -12,11 +12,11 @@ import FilterBar from '../components/ui/FilterBar';
 import { useAsync } from '../hooks/useAsync';
 import { invoiceApi } from '../api/invoice.api';
 import { formatCurrency, formatDate, formatBillingMonth, getCurrentBillingMonth } from '../utils/format';
-// add these imports at top of Invoices.jsx
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Trash2 } from 'lucide-react';
 import { tenantApi } from '../api/tenant.api';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
+import ConfirmModal from '../components/ui/ConfirmModal';
 
 const AGING_BUCKETS = ['Current', '1-30 Days', '31-60 Days', '61-90 Days', '90+ Days'];
 const STATUSES = ['Pending', 'Paid', 'Partial'];
@@ -180,6 +180,7 @@ export default function Invoices() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [genOpen, setGenOpen] = useState(false);
   const [singleGenOpen, setSingleGenOpen] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState(null);
 
   const { data, loading, error, refetch } = useAsync(
     () => invoiceApi.getAll({ ...filters, page, limit: 50 }),
@@ -216,6 +217,25 @@ export default function Invoices() {
       setDetailData(res.data);
     } catch { setDetailData(inv); }
     finally { setLoadingDetail(false); }
+  };
+
+  const handleDeleteInvoice = (id, e) => {
+    e.stopPropagation();
+    setConfirmConfig({
+      title: 'Delete Invoice',
+      message: 'Are you sure you want to delete this invoice? This will also remove any receipts associated with it. This action cannot be undone.',
+      confirmVariant: 'danger',
+      confirmText: 'Delete',
+      onConfirm: async () => {
+        try {
+          await invoiceApi.delete(id);
+          showToast('Invoice deleted successfully');
+          refetch();
+        } catch (err) {
+          showToast(err.response?.data?.message || err.message, 'error');
+        }
+      }
+    });
   };
 
   const filterConfig = [
@@ -320,12 +340,17 @@ export default function Invoices() {
     },
     {
       key: 'aging_bucket', label: 'Aging', className: 'hidden md:table-cell',
-      render: (r) => (
-        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium
-          ${agingColors[r.aging_bucket] ?? 'bg-slate-100 text-slate-600'}`}>
-          {r.aging_bucket}
-        </span>
-      ),
+      render: (r) => {
+        if (r.status === 'Paid' || r.outstanding_balance <= 0) {
+          return <span className="text-slate-400">—</span>;
+        }
+        return (
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium
+            ${agingColors[r.aging_bucket] ?? 'bg-slate-100 text-slate-600'}`}>
+            {r.aging_bucket}
+          </span>
+        );
+      },
     },
     {
       key: 'status', label: 'Status',
@@ -334,7 +359,14 @@ export default function Invoices() {
     {
       key: 'actions', label: '',
       render: (r) => (
-        <div className="flex items-center justify-end w-4">
+        <div className="flex items-center justify-end w-4 gap-1">
+          <button
+            onClick={(e) => handleDeleteInvoice(r.id, e)}
+            className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"
+            title="Delete Invoice"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
         </div>
       ),
     },
@@ -441,6 +473,18 @@ export default function Invoices() {
     ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
           {toast.msg}
         </div>
+      )}
+
+      {confirmConfig && (
+        <ConfirmModal
+          open={!!confirmConfig}
+          onClose={() => setConfirmConfig(null)}
+          title={confirmConfig.title}
+          message={confirmConfig.message}
+          onConfirm={confirmConfig.onConfirm}
+          confirmText={confirmConfig.confirmText}
+          confirmVariant={confirmConfig.confirmVariant}
+        />
       )}
     </div>
   );
