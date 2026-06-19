@@ -1,6 +1,14 @@
 import pool from '../config/db.js';
 
 export async function getAgingSummary(req, res) {
+  // CLEAN DB OF NaN VALUES
+  try {
+    await pool.query(`UPDATE invoices SET bill_amount = 0 WHERE bill_amount IS NULL OR bill_amount::text = 'NaN' OR bill_amount::text = 'null'`);
+    await pool.query(`UPDATE invoices SET outstanding_balance = 0 WHERE outstanding_balance IS NULL OR outstanding_balance::text = 'NaN' OR outstanding_balance::text = 'null'`);
+  } catch (e) {
+    console.error('NaN cleanup failed', e);
+  }
+
   const { property_name } = req.query;
   const params = [];
   let where = `WHERE outstanding_balance > 0`;
@@ -84,6 +92,7 @@ export async function getOutstandingRegister(req, res) {
   const dataQuery = `
     SELECT
       i.id,
+      i.tenant_id,
       i.tenant_name,
       i.property_name,
       i.category,
@@ -128,13 +137,14 @@ export async function getOutstandingRegister(req, res) {
   });
 }
 
-// ─── GET /receivables/tenant/:tenantName ──────────────────────────────────────
+// ─── GET /receivables/tenant/:tenantId ──────────────────────────────────────
 export async function getTenantOutstanding(req, res) {
-  const tenantName = decodeURIComponent(req.params.tenantName);
+  const tenantId = req.params.tenantId;
 
   const [summaryRes, invoicesRes] = await Promise.all([
     pool.query(
       `SELECT
+         tenant_id,
          tenant_name,
          COUNT(*)                               AS total_invoices,
          COALESCE(SUM(bill_amount),         0)  AS total_billed,
@@ -143,9 +153,9 @@ export async function getTenantOutstanding(req, res) {
          MAX(overdue_by_days)                   AS max_overdue_days,
          MIN(due_date)                          AS oldest_due_date
        FROM invoices
-       WHERE tenant_name = $1
-       GROUP BY tenant_name`,
-      [tenantName]
+       WHERE tenant_id = $1
+       GROUP BY tenant_id, tenant_name`,
+      [tenantId]
     ),
     pool.query(
       `SELECT
@@ -156,9 +166,9 @@ export async function getTenantOutstanding(req, res) {
          t.unit_no
        FROM invoices i
        LEFT JOIN tenants t ON t.id = i.tenant_id
-       WHERE i.tenant_name = $1
+       WHERE i.tenant_id = $1
        ORDER BY i.bill_date DESC`,
-      [tenantName]
+      [tenantId]
     ),
   ]);
 
@@ -178,6 +188,7 @@ export async function getOverdueAlerts(req, res) {
    // overdue invoices grouped by tenant — LIVE calculation
 pool.query(
   `SELECT
+     tenant_id,
      tenant_name,
      property_name,
      COUNT(*)                                      AS invoice_count,
@@ -187,13 +198,14 @@ pool.query(
    FROM invoices
    WHERE outstanding_balance > 0
      AND due_date < CURRENT_DATE
-   GROUP BY tenant_name, property_name
+   GROUP BY tenant_id, tenant_name, property_name
    ORDER BY max_overdue_days DESC, total_overdue DESC
    LIMIT 20`
 ),
     // leases expiring in 60 days
     pool.query(
       `SELECT
+         t.id           AS tenant_id,
          t.name         AS tenant_name,
          p.name         AS property_name,
          t.lease_end,
@@ -211,6 +223,7 @@ pool.query(
   // invoices with no collection for 30+ days past due — LIVE calculation
 pool.query(
   `SELECT
+     tenant_id,
      tenant_name,
      property_name,
      COUNT(*)                                    AS invoice_count,
@@ -220,7 +233,7 @@ pool.query(
    WHERE outstanding_balance > 0
      AND (CURRENT_DATE - due_date) > 30
      AND amount_collected = 0
-   GROUP BY tenant_name, property_name
+   GROUP BY tenant_id, tenant_name, property_name
    ORDER BY overdue_days DESC
    LIMIT 10`
 ),

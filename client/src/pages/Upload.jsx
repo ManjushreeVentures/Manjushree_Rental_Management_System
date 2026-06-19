@@ -196,7 +196,7 @@ export default function Upload() {
             <div className="border-b border-slate-200 px-5 py-3">
               <p className="text-sm font-semibold text-slate-700">Expected Excel Columns</p>
             </div>
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-slate-100 max-h-[300px] overflow-y-auto custom-scrollbar">
               {[
                 ['Location', 'Property name (must match master)'],
                 ['Tenant Name', 'Tenant name (must match master)'],
@@ -233,9 +233,9 @@ export default function Upload() {
           ) : !history.length ? (
             <p className="py-10 text-center text-sm text-slate-400">No uploads yet</p>
           ) : (
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-slate-100 max-h-[500px] overflow-y-auto custom-scrollbar">
               {history.map((h) => (
-                <div key={h.id} className="px-5 py-4">
+                <div key={h.id} className="px-5 py-4 hover:bg-slate-50 transition-colors">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <FileSpreadsheet className="h-4 w-4 text-slate-400 shrink-0" />
@@ -243,10 +243,10 @@ export default function Upload() {
                     </div>
                     <UploadStatusBadge status={h.status} />
                   </div>
-                  <div className="mt-2 flex gap-4 text-xs text-slate-500">
+                  <div className="mt-2 flex gap-4 text-[11px] text-slate-500 font-medium">
                     <span>{formatDate(h.uploaded_at)}</span>
                     {h.rows_imported > 0 && (
-                      <span className="text-emerald-600 font-medium">
+                      <span className="text-emerald-600">
                         ✓ {h.rows_imported} imported
                       </span>
                     )}

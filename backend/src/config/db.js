@@ -47,6 +47,22 @@ pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS attachment_url TEXT')
   .then(() => console.log('✅ Checked database schema: attachment_url column exists in tenants'))
   .catch(console.error);
 
+pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS lock_in_period INTEGER')
+  .then(() => console.log('✅ Checked database schema: lock_in_period column exists in tenants'))
+  .catch(console.error);
+
+pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS leased_period INTEGER')
+  .then(() => console.log('✅ Checked database schema: leased_period column exists in tenants'))
+  .catch(console.error);
+
+pool.query('ALTER TABLE tenants ALTER COLUMN property_id DROP NOT NULL')
+  .then(() => console.log('✅ Checked database schema: property_id optional in tenants'))
+  .catch(console.error);
+
+pool.query('ALTER TABLE invoices ALTER COLUMN property_id DROP NOT NULL')
+  .then(() => console.log('✅ Checked database schema: property_id optional in invoices'))
+  .catch(console.error);
+
 // Auto-migration: ensure audit_logs table exists
 pool.query(`
   CREATE TABLE IF NOT EXISTS audit_logs (

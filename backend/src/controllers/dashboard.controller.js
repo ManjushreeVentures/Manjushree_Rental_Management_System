@@ -2,15 +2,17 @@ import {
   getKPIs as fetchKPIs,
   getAgingSnapshot as fetchAging,
   getTenantSummary as fetchTenants,
+  getPropertySummary as fetchProperties,
   getDashboardAlerts as fetchAlerts,
   getRecentActivity as fetchActivity,
 } from '../services/dashboard.service.js';
 
 export async function getDashboardFull(req, res) {
-  const [kpis, aging, tenants, alerts, activity] = await Promise.all([
+  const [kpis, aging, tenants, properties, alerts, activity] = await Promise.all([
     fetchKPIs(),
     fetchAging(),
     fetchTenants(),
+    fetchProperties(),
     fetchAlerts(),
     fetchActivity(),
   ]);
@@ -21,6 +23,7 @@ export async function getDashboardFull(req, res) {
       kpis,
       aging,
       tenants,
+      properties,
       alerts,
       activity,
     }

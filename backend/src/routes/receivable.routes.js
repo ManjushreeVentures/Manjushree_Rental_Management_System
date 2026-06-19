@@ -11,7 +11,7 @@ const router = Router();
 
 router.get('/aging',               getAgingSummary);
 router.get('/register',            getOutstandingRegister);
-router.get('/tenant/:tenantName',  getTenantOutstanding);
+router.get('/tenant/:tenantId',    getTenantOutstanding);
 router.get('/alerts',              getOverdueAlerts);
 router.get('/trend',               getCollectionTrend);
 

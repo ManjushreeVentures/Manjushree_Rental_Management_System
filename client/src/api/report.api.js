@@ -43,6 +43,6 @@ async function _download(path, params) {
     window.URL.revokeObjectURL(url);
   } catch (err) {
     console.error('Download failed:', err);
-    alert('Failed to download report. Please try again.');
+    throw err;
   }
 }

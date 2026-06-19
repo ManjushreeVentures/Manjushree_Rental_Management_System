@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   Receipt as ReceiptIcon, Plus, Trash2,
   Banknote, CreditCard, Landmark,
   Smartphone, Wallet, MoreHorizontal,
-  Paperclip,
+  Paperclip, X, CheckCircle2
 } from 'lucide-react';
 import PageHeader   from '../components/ui/PageHeader';
 import { Table }    from '../components/ui/Table';
@@ -17,6 +17,9 @@ import { useAsync } from '../hooks/useAsync';
 import { receiptApi }  from '../api/receipt.api';
 import { invoiceApi }  from '../api/invoice.api';
 import { formatCurrency, formatDate, formatBillingMonth, getCurrentBillingMonth } from '../utils/format';
+import { useToast } from '../contexts/ToastContext';
+import KPICard from '../components/ui/KPICard';
+import { useInvoiceSearch } from '../hooks/useInvoiceSearch';
 import PinModal from '../components/PinModal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 
@@ -40,21 +43,22 @@ const modeColors = {
   Other:  'bg-slate-100 text-slate-600',
 };
 
-// ─── KPI strip ────────────────────────────────────────────────────────────────
 function ReceiptKPIs({ stats }) {
   if (!stats) return null;
-  const modes = ['NEFT', 'RTGS', 'Cheque', 'UPI', 'Cash'];
   return (
-    <div className="mb-6 space-y-3">
-      {/* total */}
-      {/* total */}
-      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm min-w-0 max-w-sm">
-        <p className="text-xs sm:text-sm text-slate-500 truncate">Total Collected</p>
-        <p className="text-2xl sm:text-3xl font-bold text-emerald-700 mt-1 truncate" title={formatCurrency(stats.total_collected)}>
-          {formatCurrency(stats.total_collected)}
-        </p>
-        <p className="text-xs sm:text-sm text-slate-400 mt-1 truncate">{stats.total_receipts} receipts recorded</p>
-      </div>
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+      <KPICard 
+        label="Total Collected" 
+        value={formatCurrency(stats.total_collected)} 
+        icon={<Banknote className="h-5 w-5 text-emerald-600" />} 
+        iconBgClass="bg-emerald-50" 
+      />
+      <KPICard 
+        label="Receipt Count" 
+        value={stats.total_receipts} 
+        icon={<ReceiptIcon className="h-5 w-5 text-blue-600" />} 
+        iconBgClass="bg-blue-50" 
+      />
     </div>
   );
 }
@@ -70,14 +74,12 @@ const emptyForm = {
   attachment_url: '',
 };
 
-function RecordPaymentForm({ onSubmit, loading }) {
+function RecordPaymentForm({ onSubmit, loading, showToast }) {
   const [form,   setForm]   = useState(emptyForm);
   const [errors, setErrors] = useState({});
-  const [invoiceSearch, setInvoiceSearch] = useState('');
-  const [invoiceOptions, setInvoiceOptions] = useState([]);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
-  const [searching, setSearching] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const { search: invoiceSearch, options: invoiceOptions, searching, searchInvoices, clearSearch } = useInvoiceSearch();
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -89,32 +91,12 @@ function RecordPaymentForm({ onSubmit, loading }) {
       const res = await receiptApi.uploadFile(file);
       setForm((f) => ({ ...f, attachment_url: res.url }));
     } catch (err) {
-      alert(err.message || 'File upload failed');
+      showToast(err.message || 'Failed to upload file', 'error');
     } finally {
       setUploading(false);
     }
   };
 
-  // search pending invoices
-  const searchInvoices = async (q) => {
-    setInvoiceSearch(q);
-    if (q.length < 2) { setInvoiceOptions([]); return; }
-    setSearching(true);
-    try {
-      const res = await invoiceApi.getAll({
-        search: q, status: 'Pending', limit: 10,
-      });
-      // also include partial
-      const res2 = await invoiceApi.getAll({
-        search: q, status: 'Partial', limit: 10,
-      });
-      setInvoiceOptions([
-        ...(res.data  ?? []),
-        ...(res2.data ?? []),
-      ]);
-    } catch { setInvoiceOptions([]); }
-    finally { setSearching(false); }
-  };
 
   const selectInvoice = (inv) => {
     setSelectedInvoice(inv);
@@ -123,8 +105,13 @@ function RecordPaymentForm({ onSubmit, loading }) {
       invoice_id: inv.id,
       amount:     inv.outstanding_balance,
     }));
-    setInvoiceOptions([]);
-    setInvoiceSearch(`${inv.tenant_name} — ${formatBillingMonth(inv.billing_month)} (${formatCurrency(inv.outstanding_balance)})`);
+    searchInvoices(`${inv.tenant_name} — ${formatBillingMonth(inv.billing_month)} (${formatCurrency(inv.outstanding_balance)})`);
+  };
+
+  const clearInvoiceSelection = () => {
+    setSelectedInvoice(null);
+    setForm((f) => ({ ...f, invoice_id: '', amount: '' }));
+    clearSearch();
   };
 
   const validate = () => {
@@ -160,14 +147,17 @@ function RecordPaymentForm({ onSubmit, loading }) {
         {errors.invoice_id && <p className="text-xs text-red-500">{errors.invoice_id}</p>}
 
         {/* dropdown */}
-        {invoiceOptions.length > 0 && (
+        {!selectedInvoice && invoiceSearch.length >= 2 && (
           <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-xl
             border border-slate-200 bg-white shadow-lg max-h-56 overflow-y-auto">
             {searching && (
               <p className="px-4 py-3 text-xs text-slate-400 animate-pulse">Searching…</p>
             )}
+            {!searching && invoiceOptions.length === 0 && (
+              <p className="px-4 py-3 text-xs text-slate-500">No matching invoices found</p>
+            )}
             {invoiceOptions.map((inv) => (
-              <button key={inv.id}
+              <button key={inv.id} type="button"
                 onClick={() => selectInvoice(inv)}
                 className="w-full text-left px-4 py-3 hover:bg-blue-50
                   border-b border-slate-100 last:border-0 transition">
@@ -189,8 +179,11 @@ function RecordPaymentForm({ onSubmit, loading }) {
 
       {/* selected invoice summary */}
       {selectedInvoice && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm">
-          <div className="flex justify-between items-start">
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm relative">
+          <button type="button" onClick={clearInvoiceSelection} className="absolute top-2 right-2 p-1 hover:bg-blue-100 rounded-lg text-blue-400 hover:text-blue-600 transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+          <div className="flex justify-between items-start pr-6">
             <div>
               <p className="font-semibold text-blue-900">{selectedInvoice.tenant_name}</p>
               <p className="text-xs text-blue-700">
@@ -208,14 +201,19 @@ function RecordPaymentForm({ onSubmit, loading }) {
       )}
 
       <div className="grid grid-cols-2 gap-4">
-        <Input
-          label="Amount (₹) *"
-          type="number"
-          value={form.amount}
-          onChange={set('amount')}
-          error={errors.amount}
-          placeholder="0"
-        />
+        <div className="flex flex-col">
+          <Input
+            label="Amount (₹) *"
+            type="number"
+            value={form.amount}
+            onChange={set('amount')}
+            error={errors.amount}
+            placeholder="0"
+          />
+          {selectedInvoice && form.amount > selectedInvoice.outstanding_balance && (
+            <p className="text-[10px] text-orange-600 font-medium mt-1">Exceeds outstanding by {formatCurrency(form.amount - selectedInvoice.outstanding_balance)}</p>
+          )}
+        </div>
         <Input
           label="Payment Date *"
           type="date"
@@ -266,7 +264,7 @@ function RecordPaymentForm({ onSubmit, loading }) {
             )}
             {!uploading && form.attachment_url && (
               <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-                ✓ Ready
+                <CheckCircle2 className="h-4 w-4" /> Ready
               </span>
             )}
           </div>
@@ -301,12 +299,12 @@ const defaultFilters = {
 };
 
 export default function Receipts() {
+  const { showToast } = useToast();
   const [filters,   setFilters]   = useState(defaultFilters);
   const [page,      setPage]      = useState(1);
   const [modal,     setModal]     = useState(false);
   const [saving,    setSaving]    = useState(false);
-  const [toast,     setToast]     = useState(null);
-  const [pinModalFile, setPinModalFile] = useState(null);
+  const [pinAction, setPinAction] = useState(null);
   const [confirmConfig, setConfirmConfig] = useState(null);
 
   const { data, loading, error, refetch } = useAsync(
@@ -332,11 +330,6 @@ export default function Receipts() {
   const stats    = statsData?.data;
   const months   = monthsData?.data ?? [];
 
-  const showToast = (msg, type = 'success') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  };
-
   const updateFilter = (key, value) => {
     setFilters((f) => ({ ...f, [key]: value }));
     setPage(1);
@@ -346,12 +339,12 @@ export default function Receipts() {
     setSaving(true);
     try {
       await receiptApi.create(form);
-      showToast('Payment recorded successfully');
+      showToast('Receipt recorded successfully', 'success');
       setModal(false);
       refetch();
       refetchStats();
-    } catch (e) {
-      showToast(e.message, 'error');
+    } catch (err) {
+      showToast(err.response?.data?.message || err.message, 'error');
     } finally { setSaving(false); }
   };
 
@@ -364,11 +357,11 @@ export default function Receipts() {
       onConfirm: async () => {
         try {
           await receiptApi.remove(id);
-          showToast('Receipt deleted, balance restored');
+          showToast('Receipt deleted successfully');
           refetch();
           refetchStats();
-        } catch (e) {
-          showToast(e.message, 'error');
+        } catch (err) {
+          showToast(err.response?.data?.message || err.message, 'error');
         }
       }
     });
@@ -442,9 +435,16 @@ export default function Receipts() {
       },
     },
     {
-      key: 'reference_no', label: 'Reference', className: 'hidden lg:table-cell',
+      key: 'reference_no', label: 'Ref / Remarks', className: 'hidden lg:table-cell',
       render: (r) => (
-        <span className="font-mono text-xs text-slate-600">{r.reference_no || '—'}</span>
+        <div>
+          <span className="font-mono text-xs text-slate-600 block">{r.reference_no || '—'}</span>
+          {r.remarks && (
+            <span className="text-[10px] text-slate-400 mt-0.5 block truncate max-w-[150px]" title={r.remarks}>
+              {r.remarks}
+            </span>
+          )}
+        </div>
       ),
     },
     {
@@ -453,12 +453,11 @@ export default function Receipts() {
         if (!r.attachment_url) return <span className="text-slate-400">—</span>;
         return (
           <button
-            onClick={() => setPinModalFile(r.attachment_url)}
-            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold
-              text-teal-600 hover:text-teal-700 bg-teal-50 hover:bg-teal-100
-              border border-teal-200 hover:border-teal-300 rounded-lg transition"
+            onClick={() => setPinAction({ type: 'view', url: r.attachment_url })}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+            title="View Document"
           >
-            <Paperclip className="h-3 w-3 shrink-0" /> View Document
+            <Paperclip className="h-4 w-4 shrink-0" />
           </button>
         );
       },
@@ -475,7 +474,7 @@ export default function Receipts() {
         }`}>
           {r.invoice_outstanding > 0
             ? formatCurrency(r.invoice_outstanding)
-            : '✓ Cleared'}
+            : <span className="flex items-center justify-end gap-1"><CheckCircle2 className="h-3 w-3" /> Cleared</span>}
         </span>
       ),
     },
@@ -506,7 +505,20 @@ export default function Receipts() {
         }
       />
 
-      <ReceiptKPIs stats={stats} />
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+        <KPICard 
+          label="Total Collected" 
+          value={formatCurrency(stats?.total_collected)} 
+          icon={<Banknote className="h-5 w-5 text-emerald-600" />} 
+          iconBgClass="bg-emerald-50" 
+        />
+        <KPICard 
+          label="Receipt Count" 
+          value={stats?.total_receipts} 
+          icon={<ReceiptIcon className="h-5 w-5 text-blue-600" />} 
+          iconBgClass="bg-blue-50" 
+        />
+      </div>
 
       <FilterBar
         filters={filterConfig}
@@ -542,7 +554,6 @@ export default function Receipts() {
         />
       </div>
 
-      {/* Record Payment Modal */}
       <Modal
         open={modal}
         onClose={() => setModal(false)}
@@ -552,16 +563,8 @@ export default function Receipts() {
         <RecordPaymentForm onSubmit={handleCreate} loading={saving} />
       </Modal>
 
-      {pinModalFile && (
-        <PinModal filename={pinModalFile} onClose={() => setPinModalFile(null)} />
-      )}
-
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 rounded-xl px-4 py-3
-          text-sm font-medium shadow-lg
-          ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
-          {toast.msg}
-        </div>
+      {pinAction?.type === 'view' && (
+        <PinModal filename={pinAction.url} onClose={() => setPinAction(null)} />
       )}
 
       {confirmConfig && (

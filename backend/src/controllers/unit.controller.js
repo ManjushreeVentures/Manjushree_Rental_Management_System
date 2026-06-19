@@ -52,11 +52,11 @@ export async function createUnit(req, res) {
 
 export async function updateUnit(req, res) {
   const fields = req.body;
-  const keys   = Object.keys(fields);
+  const keys = Object.keys(fields);
   if (!keys.length) return res.status(400).json({ success: false, message: 'Nothing to update' });
 
   const setClauses = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
-  const values     = [...Object.values(fields), req.params.id];
+  const values = [...Object.values(fields), req.params.id];
 
   const { rows } = await pool.query(
     `UPDATE units SET ${setClauses}, updated_at = NOW()

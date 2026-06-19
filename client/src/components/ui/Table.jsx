@@ -19,7 +19,7 @@ export function Table({ columns, data, loading, emptyMsg = 'No records found', f
     <div className="overflow-x-auto custom-scrollbar table-scroll-container rounded-lg border border-slate-200/60 bg-white/50 backdrop-blur-sm">
       <table className="w-full text-sm">
         <thead>
-          <tr className="bg-slate-50/80 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200/60">
+          <tr className="bg-gradient-to-r from-teal-50 to-blue-50/50 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-200">
             {columns.map((c) => (
               <th key={c.key} className={`px-4 py-3 ${c.className ?? ''}`}>{c.label}</th>
             ))}
@@ -27,7 +27,7 @@ export function Table({ columns, data, loading, emptyMsg = 'No records found', f
         </thead>
         <tbody className="divide-y divide-slate-100/80 bg-white/40">
           {data.map((row, i) => (
-            <tr key={row.id ?? i} className="hover:bg-slate-50/80 transition-colors duration-200">
+            <tr key={row.id ?? i} className="hover:bg-blue-50/60 transition-colors duration-200">
               {columns.map((c) => (
                 <td key={c.key} className={`px-4 py-3 ${c.className ?? ''}`}>
                   {c.render ? c.render(row) : row[c.key] ?? '—'}

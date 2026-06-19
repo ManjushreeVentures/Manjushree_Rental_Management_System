@@ -1,131 +1,3 @@
-// import pool from '../config/db.js';
-// import { parseExcelBuffer } from '../services/excelParser.services.js';
-
-// export async function uploadExcel(req, res) {
-//   if (!req.file)
-//     return res.status(400).json({ success: false, message: 'No file uploaded' });
-
-//   const auditRes = await pool.query(
-//     `INSERT INTO excel_uploads (filename, status) VALUES ($1, 'processing') RETURNING id`,
-//     [req.file.originalname]
-//   );
-//   const batchId = auditRes.rows[0].id;
-
-//   try {
-//     const { rows, skipped } = parseExcelBuffer(req.file.buffer);
-
-//     if (!rows.length) {
-//       await pool.query(
-//         `UPDATE excel_uploads SET status='failed', rows_skipped=$1,
-//           error_log=$2, uploaded_at=NOW() WHERE id=$3`,
-//         [skipped.length, JSON.stringify(skipped), batchId]
-//       );
-//       return res.status(422).json({
-//         success: false,
-//         message: 'No valid rows found in file',
-//         skipped,
-//       });
-//     }
-
-//     const propNames   = [...new Set(rows.map((r) => r.property_name))];
-//     const tenantNames = [...new Set(rows.map((r) => r.tenant_name))];
-
-//     const propRows = await pool.query(
-//       `SELECT id, name FROM properties WHERE name = ANY($1)`, [propNames]
-//     );
-//     const tenantRows = await pool.query(
-//       `SELECT id, name FROM tenants WHERE name = ANY($1)`, [tenantNames]
-//     );
-
-//     const propMap   = Object.fromEntries(propRows.rows.map((r)   => [r.name, r.id]));
-//     const tenantMap = Object.fromEntries(tenantRows.rows.map((r) => [r.name, r.id]));
-
-//     const client = await pool.connect();
-//     try {
-//       await client.query('BEGIN');
-
-//       let imported = 0;
-//       for (const row of rows) {
-//         await client.query(
-//           `INSERT INTO invoices
-//             (property_name, tenant_name, property_id, tenant_id,
-//              category, bill_date, bill_amount, billing_month,
-//              credit_terms_days, due_date, status,
-//              amount_collected, outstanding_balance,
-//              overdue_by_days, aging_bucket, upload_batch_id)
-//            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-//           [
-//             row.property_name,
-//             row.tenant_name,
-//             propMap[row.property_name]   ?? null,
-//             tenantMap[row.tenant_name]   ?? null,
-//             row.category,
-//             row.bill_date,
-//             row.bill_amount,
-//             row.billing_month,
-//             row.credit_terms_days,
-//             row.due_date,
-//             row.status,
-//             row.amount_collected,
-//             row.outstanding_balance,
-//             row.overdue_by_days,
-//             row.aging_bucket,
-//             batchId,
-//           ]
-//         );
-//         imported++;
-//       }
-
-//       await client.query('COMMIT');
-
-//       await pool.query(
-//         `UPDATE excel_uploads
-//          SET status='done', rows_imported=$1, rows_skipped=$2,
-//              error_log=$3, uploaded_at=NOW()
-//          WHERE id=$4`,
-//         [imported, skipped.length, JSON.stringify(skipped), batchId]
-//       );
-
-//       res.json({
-//         success: true,
-//         message: `${imported} rows imported successfully`,
-//         data: {
-//           batchId,
-//           imported,
-//           skipped:        skipped.length,
-//           skippedDetails: skipped,
-//         },
-//       });
-//     } catch (err) {
-//       await client.query('ROLLBACK');
-//       throw err;
-//     } finally {
-//       client.release();
-//     }
-//   } catch (err) {
-//      console.error("❌ UPLOAD ERROR:", err); 
-//     await pool.query(
-//       `UPDATE excel_uploads SET status='failed', error_log=$1 WHERE id=$2`,
-//       [JSON.stringify([{ error: err.message }]), batchId]
-//     );
-
-//     const isValidationError = String(err.message).startsWith('Missing required Excel headers');
-//     if (isValidationError) {
-//       return res.status(422).json({ success: false, message: err.message });
-//     }
-
-//     return res.status(500).json({ success: false, message: err.message || 'Upload failed' });
-//   }
-// }
-
-// export async function getUploadHistory(req, res) {
-//   const { rows } = await pool.query(
-//     `SELECT * FROM excel_uploads ORDER BY uploaded_at DESC LIMIT 50`
-//   );
-//   res.json({ success: true, data: rows });
-// }
-
-
 import pool from '../config/db.js';
 import { parseExcelBuffer } from '../services/excelParser.services.js';
 
@@ -219,16 +91,75 @@ export async function uploadExcel(req, res) {
         }
 
         tenantMap[`${row.tenant_name}|||${row.property_name}`] = tenantId;
+        
+        // Deactivate and reset amount to 0 for all existing categories. 
+        // We will reactivate/insert and aggregate the ones present in this new Excel upload.
+        await client.query(`UPDATE tenant_categories SET is_active = false, amount = 0 WHERE tenant_id = $1`, [tenantId]);
+      }
+
+      function convertToYYYYMM(billing_month) {
+        if (!billing_month) return null;
+        const parts = billing_month.split('-');
+        if (parts.length === 2) {
+          const mStr = parts[0].substring(0,3);
+          const y = parts[1];
+          const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const mIdx = months.findIndex(m => m.toLowerCase() === mStr.toLowerCase());
+          if (mIdx !== -1) {
+            return `${y}-${String(mIdx + 1).padStart(2, '0')}`;
+          }
+        }
+        return null;
+      }
+
+      // Find the latest billing month (YYYY-MM) for each tenant in this Excel file
+      const tenantMaxMonth = {};
+      for (const row of rows) {
+        const tenantId = tenantMap[`${row.tenant_name}|||${row.property_name}`];
+        if (!tenantId || !row.billing_month) continue;
+        
+        const yyyymm = convertToYYYYMM(row.billing_month);
+        if (!yyyymm) continue;
+
+        if (!tenantMaxMonth[tenantId] || yyyymm > tenantMaxMonth[tenantId]) {
+          tenantMaxMonth[tenantId] = yyyymm;
+        }
       }
 
       // ── Step 3: insert invoices ───────────────────────────────────────────
-      let imported      = 0;
+      let imported = 0;
       let receiptsCreated = 0;
       let duplicatesSkipped = 0;
 
       for (const row of rows) {
-        const propertyId = propMap[row.property_name]   ?? null;
-        const tenantId   = tenantMap[`${row.tenant_name}|||${row.property_name}`] ?? null;
+        const propertyId = propMap[row.property_name] ?? null;
+        const tenantId = tenantMap[`${row.tenant_name}|||${row.property_name}`] ?? null;
+
+        // ── Step 3.5: sync tenant category ─────────────────────────────────
+        // We do this FIRST so even if the invoice is a duplicate, the category base amounts are synced correctly!
+        if (tenantId && row.category && row.billing_month) {
+          const yyyymm = convertToYYYYMM(row.billing_month);
+          if (yyyymm && yyyymm === tenantMaxMonth[tenantId]) {
+            // ONLY sync this row into categories if it belongs to the tenant's LATEST billed month
+            const catExists = await client.query(
+              `SELECT id FROM tenant_categories WHERE tenant_id = $1 AND category = $2`,
+              [tenantId, row.category]
+            );
+            if (catExists.rows.length === 0) {
+              await client.query(
+                `INSERT INTO tenant_categories (tenant_id, category, amount, is_active)
+                 VALUES ($1, $2, $3, true)`,
+                [tenantId, row.category, parseFloat(row.bill_amount) || 0]
+              );
+            } else {
+              // Update the existing category amount by adding to it (handles multiple units with the same category)
+              await client.query(
+                `UPDATE tenant_categories SET amount = amount + $1, is_active = true WHERE id = $2`,
+                [parseFloat(row.bill_amount) || 0, catExists.rows[0].id]
+              );
+            }
+          }
+        }
 
         // Skip if invoice already exists for this tenant, month, category, date, and amount
         if (tenantId && row.billing_month && row.category) {
@@ -278,20 +209,7 @@ export async function uploadExcel(req, res) {
         const invoiceId = invRes.rows[0].id;
         imported++;
 
-        // ── Step 3.5: sync tenant category ─────────────────────────────────
-        if (tenantId && row.category) {
-          const catExists = await client.query(
-            `SELECT id FROM tenant_categories WHERE tenant_id = $1 AND category = $2`,
-            [tenantId, row.category]
-          );
-          if (catExists.rows.length === 0) {
-            await client.query(
-              `INSERT INTO tenant_categories (tenant_id, category, amount, is_active)
-               VALUES ($1, $2, $3, true)`,
-              [tenantId, row.category, parseFloat(row.bill_amount) || 0]
-            );
-          }
-        }
+
 
         // ── Step 4: create receipt if amount_collected > 0 ─────────────────
         if (parseFloat(row.amount_collected) > 0) {
@@ -336,7 +254,7 @@ export async function uploadExcel(req, res) {
           imported,
           receiptsCreated,
           duplicatesSkipped,
-          skipped:        skipped.length,
+          skipped: skipped.length,
           skippedDetails: skipped,
         },
       });

@@ -21,7 +21,7 @@ export async function getAllProperties(req, res) {
 
   const { search, is_active } = req.query;
 
-  let query = `SELECT * FROM properties WHERE 1=1`;
+  let query = `SELECT * FROM properties WHERE name IS DISTINCT FROM 'Internal'`;
   const params = [];
 
   if (search) {
@@ -41,9 +41,13 @@ export async function getAllProperties(req, res) {
   const unitsResult = await pool.query(`SELECT property_id, total_area, tenant_id, rent_amount FROM units WHERE is_active = true`);
   const allUnits = unitsResult.rows;
 
+  // Fetch tenants for properties that don't use the units system
+  const tenantsResult = await pool.query(`SELECT property_id, SUM(tenant_area) as leased_area, SUM(COALESCE(monthly_rent,0) + COALESCE(cam_amount,0)) as total_rent FROM tenants WHERE is_active = true GROUP BY property_id`);
+  const tenantSums = tenantsResult.rows;
+
   const dynamicProperties = rows.map(property => {
     const propertyUnits = allUnits.filter(u => u.property_id === property.id);
-    
+
     if (propertyUnits.length > 0) {
       let calcTotalArea = 0;
       let calcLeasedArea = 0;
@@ -53,7 +57,7 @@ export async function getAllProperties(req, res) {
       for (const u of propertyUnits) {
         const area = Number(u.total_area) || 0;
         const rent = Number(u.rent_amount) || 0;
-        
+
         calcTotalArea += area;
         if (u.tenant_id) {
           calcLeasedArea += area;
@@ -63,10 +67,26 @@ export async function getAllProperties(req, res) {
         }
       }
 
+      const propertyTotalArea = Number(property.total_area) || 0;
+      if (propertyTotalArea > calcTotalArea) {
+        calcVacantArea += (propertyTotalArea - calcTotalArea);
+        calcTotalArea = propertyTotalArea;
+      }
+
       property.total_area = calcTotalArea;
       property.leased_area = calcLeasedArea;
       property.vacant_area = calcVacantArea;
       property.total_amount = calcTotalAmount;
+    } else {
+      // Fallback: Calculate from tenants if there are no units
+      const tSum = tenantSums.find(t => t.property_id === property.id);
+      if (tSum) {
+        property.leased_area = Number(tSum.leased_area) || 0;
+        property.total_amount = Number(tSum.total_rent) || 0;
+        // Without units, total area is at least the leased area, or whatever was set manually
+        property.total_area = Math.max(Number(property.total_area) || 0, property.leased_area);
+        property.vacant_area = Math.max(0, property.total_area - property.leased_area);
+      }
     }
     return property;
   });
@@ -101,7 +121,7 @@ export async function getPropertyById(req, res) {
   for (const u of units) {
     const area = Number(u.total_area) || 0;
     const rent = Number(u.rent_amount) || 0;
-    
+
     calcTotalArea += area;
     if (u.tenant_id) {
       calcLeasedArea += area;
@@ -113,10 +133,26 @@ export async function getPropertyById(req, res) {
 
   // If the property has units, override the static fields with dynamic ones
   if (units.length > 0) {
+    const propertyTotalArea = Number(property.total_area) || 0;
+    if (propertyTotalArea > calcTotalArea) {
+      calcVacantArea += (propertyTotalArea - calcTotalArea);
+      calcTotalArea = propertyTotalArea;
+    }
+
     property.total_area = calcTotalArea;
     property.leased_area = calcLeasedArea;
     property.vacant_area = calcVacantArea;
     property.total_amount = calcTotalAmount;
+  } else {
+    // Fallback: Calculate from tenants if there are no units
+    const tenantsResult = await pool.query(`SELECT SUM(tenant_area) as leased_area, SUM(monthly_rent) as total_rent FROM tenants WHERE property_id = $1 AND is_active = true`, [req.params.id]);
+    const tSum = tenantsResult.rows[0];
+    if (tSum && (tSum.leased_area || tSum.total_rent)) {
+      property.leased_area = Number(tSum.leased_area) || 0;
+      property.total_amount = Number(tSum.total_rent) || 0;
+      property.total_area = Math.max(Number(property.total_area) || 0, property.leased_area);
+      property.vacant_area = Math.max(0, property.total_area - property.leased_area);
+    }
   }
 
   property.units = units;
@@ -139,7 +175,7 @@ export async function createProperty(req, res) {
      RETURNING *`,
     [name, address, owner_name, gstin, total_area, leased_area, vacant_area, total_amount, is_active, attachment_url]
   );
-  
+
   await logAudit(req.user, 'CREATE', 'PROPERTY', rows[0].id, { name, address, owner_name, gstin });
 
   res.status(201).json({ success: true, data: rows[0] });
@@ -147,11 +183,11 @@ export async function createProperty(req, res) {
 
 export async function updateProperty(req, res) {
   const fields = req.body;
-  const keys   = Object.keys(fields);
+  const keys = Object.keys(fields);
   if (!keys.length) return res.status(400).json({ success: false, message: 'Nothing to update' });
 
   const setClauses = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
-  const values     = [...Object.values(fields), req.params.id];
+  const values = [...Object.values(fields), req.params.id];
 
   const { rows } = await pool.query(
     `UPDATE properties SET ${setClauses}, updated_at = NOW()
@@ -159,7 +195,7 @@ export async function updateProperty(req, res) {
     values
   );
   if (!rows.length) return res.status(404).json({ success: false, message: 'Property not found' });
-  
+
   await logAudit(req.user, 'UPDATE', 'PROPERTY', rows[0].id, fields);
 
   res.json({ success: true, data: rows[0] });
@@ -173,7 +209,7 @@ export async function deleteProperty(req, res) {
     [vacated_date || new Date().toISOString().split('T')[0], req.params.id]
   );
   if (!rows.length) return res.status(404).json({ success: false, message: 'Property not found' });
-  
+
   await logAudit(req.user, 'DELETE', 'PROPERTY', req.params.id, { vacated_date });
 
   res.json({ success: true, message: 'Property vacated' });

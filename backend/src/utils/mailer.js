@@ -13,12 +13,7 @@ export const transporter = nodemailer.createTransport({
   },
 });
 
-export const sendReminderEmail = async (toEmail, tenantName, invoicesList, totalOutstanding) => {
-  if (!process.env.SMTP_PASS) {
-    console.warn('⚠️ SMTP_PASS is missing in .env! Emails cannot be sent.');
-    return false;
-  }
-
+export const generateReminderContent = (tenantName, invoicesList, totalOutstanding) => {
   const invoiceRows = invoicesList.map(inv => `
     <tr>
       <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">${inv.category}</td>
@@ -74,12 +69,37 @@ export const sendReminderEmail = async (toEmail, tenantName, invoicesList, total
     </div>
   `;
 
+  const subject = `Payment Reminder - Outstanding Balance of ₹ ${Number(totalOutstanding).toLocaleString('en-IN')}`;
+  
+  return { subject, htmlContent };
+};
+
+export const sendReminderEmail = async (toEmail, tenantName, invoicesList, totalOutstanding, overrideSubject, overrideHtml, bcc) => {
+  if (!process.env.SMTP_PASS) {
+    console.warn('⚠️ SMTP_PASS is missing in .env! Emails cannot be sent.');
+    return false;
+  }
+
+  let subject = overrideSubject;
+  let html = overrideHtml;
+
+  if (!subject || !html) {
+    const generated = generateReminderContent(tenantName, invoicesList, totalOutstanding);
+    subject = subject || generated.subject;
+    html = html || generated.htmlContent;
+  }
+
   try {
+    // Strip HTML tags for plain text fallback
+    const plainText = html.replace(/<[^>]+>/g, '\n').replace(/\n\s*\n/g, '\n\n').trim();
+
     await transporter.sendMail({
       from: '"Manjushree Ventures" <manoj.c@manjushreeventures.com>',
       to: toEmail,
-      subject: `Payment Reminder - Outstanding Balance of ₹ ${Number(totalOutstanding).toLocaleString('en-IN')}`,
-      html: htmlContent,
+      bcc: bcc || undefined,
+      subject: subject,
+      html: html,
+      text: plainText,
     });
     return true;
   } catch (error) {

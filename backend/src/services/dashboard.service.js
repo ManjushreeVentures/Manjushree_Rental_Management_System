@@ -42,19 +42,23 @@ export async function getKPIs() {
            FILTER (WHERE category ILIKE '%rent%'
              AND bill_date >= date_trunc('year', CURRENT_DATE - INTERVAL '3 months') + INTERVAL '3 months'
            ), 0) AS annual_rent_roll
-       FROM invoices`,
+       FROM invoices
+       WHERE property_name IS DISTINCT FROM 'Internal'`,
       [targetM, targetY]
     ),
     pool.query(
       `SELECT
          COUNT(*) AS total_tenants,
-         COUNT(*) FILTER (WHERE is_active = TRUE) AS active_tenants
-       FROM tenants`
+         COUNT(*) FILTER (WHERE is_active = TRUE) AS active_tenants,
+         COALESCE(SUM(monthly_rent) FILTER (WHERE is_active = TRUE), 0) AS total_monthly_rent
+       FROM tenants
+       WHERE property_id NOT IN (SELECT id FROM properties WHERE name = 'Internal') OR property_id IS NULL`
     ),
     pool.query(
       `SELECT COALESCE(SUM(amount), 0) AS monthly_collected
        FROM receipts
-       WHERE EXTRACT(MONTH FROM payment_date) = $1 AND EXTRACT(YEAR FROM payment_date) = $2`,
+       WHERE EXTRACT(MONTH FROM payment_date) = $1 AND EXTRACT(YEAR FROM payment_date) = $2
+       AND invoice_id IN (SELECT id FROM invoices WHERE property_name IS DISTINCT FROM 'Internal')`,
       [targetM, targetY]
     )
   ]);
@@ -63,10 +67,79 @@ export async function getKPIs() {
   const occ   = occupancyRes.rows[0];
   const rec   = receiptRes.rows[0];
 
-  const totalUnits  = await pool.query(`SELECT COALESCE(SUM(total_units),0) AS units FROM properties WHERE is_active=TRUE`);
-  const units       = parseInt(totalUnits.rows[0].units) || 0;
+  const propertiesResult = await pool.query(`SELECT * FROM properties WHERE is_active=TRUE AND name IS DISTINCT FROM 'Internal'`);
+  const propertiesRows = propertiesResult.rows;
+  const allUnitsResult = await pool.query(`SELECT property_id, total_area, tenant_id, rent_amount FROM units WHERE is_active = true`);
+  const allUnits = allUnitsResult.rows;
+
+  const tenantsResult = await pool.query(`SELECT property_id, SUM(tenant_area) as leased_area, SUM(COALESCE(monthly_rent, 0) + COALESCE(cam_amount, 0)) as total_rent FROM tenants WHERE is_active = true GROUP BY property_id`);
+  const tenantSums = tenantsResult.rows;
+
+  let totalArea = 0;
+  let leasedArea = 0;
+  let vacantArea = 0;
+  let totalPropertiesAmount = 0;
+  let units = 0;
+
+  for (const property of propertiesRows) {
+    units += Number(property.total_units) || 0;
+    const propertyUnits = allUnits.filter(u => u.property_id === property.id);
+    
+    if (propertyUnits.length > 0) {
+      let calcTotalArea = 0;
+      let calcLeasedArea = 0;
+      let calcVacantArea = 0;
+      let calcTotalAmount = 0;
+
+      for (const u of propertyUnits) {
+        const area = Number(u.total_area) || 0;
+        const rent = Number(u.rent_amount) || 0;
+        
+        calcTotalArea += area;
+        if (u.tenant_id) {
+          calcLeasedArea += area;
+          calcTotalAmount += rent;
+        } else {
+          calcVacantArea += area;
+        }
+      }
+
+      // If the defined units' area is less than the property's total area, the rest is vacant
+      const propertyTotalArea = Number(property.total_area) || 0;
+      if (propertyTotalArea > calcTotalArea) {
+        calcVacantArea += (propertyTotalArea - calcTotalArea);
+        calcTotalArea = propertyTotalArea;
+      }
+
+      totalArea += calcTotalArea;
+      leasedArea += calcLeasedArea;
+      vacantArea += calcVacantArea;
+      totalPropertiesAmount += calcTotalAmount;
+    } else {
+      const tSum = tenantSums.find(t => t.property_id === property.id);
+      const tLeased = tSum ? (Number(tSum.leased_area) || 0) : 0;
+      const tRent = tSum ? (Number(tSum.total_rent) || 0) : 0;
+      
+      const pTotalArea = Math.max(Number(property.total_area) || 0, tLeased);
+      const pVacantArea = Math.max(0, pTotalArea - tLeased);
+
+      totalArea += pTotalArea;
+      leasedArea += tLeased;
+      vacantArea += pVacantArea;
+      totalPropertiesAmount += tRent;
+    }
+  }
+
+  const totalProperties = propertiesRows.length;
+
   const activeTen   = parseInt(occ.active_tenants) || 0;
-  const occupancy   = units > 0 ? ((activeTen / units) * 100).toFixed(1) : 0;
+  // Use area-based occupancy if totalArea > 0, else unit-based
+  let occupancy = 0;
+  if (totalArea > 0) {
+    occupancy = ((leasedArea / totalArea) * 100).toFixed(1);
+  } else if (units > 0) {
+    occupancy = ((activeTen / units) * 100).toFixed(1);
+  }
 
   return {
     billing_month:      currentMonthStr,
@@ -79,6 +152,12 @@ export async function getKPIs() {
     total_tenants:      parseInt(occ.total_tenants),
     active_tenants:     activeTen,
     total_units:        units,
+    total_properties:   totalProperties,
+    total_area:         totalArea,
+    leased_area:        leasedArea,
+    vacant_area:        vacantArea,
+    total_property_rent: totalPropertiesAmount || 0,
+    total_monthly_rent: parseFloat(occ.total_monthly_rent),
     rent_billed:        parseFloat(kpi.rent_billed),
     rent_collected:     parseFloat(kpi.rent_collected),
     power_billed:       parseFloat(kpi.power_billed),
@@ -125,7 +204,7 @@ export async function getAgingSnapshot() {
          WHERE compute_aging_bucket(due_date, amount_collected, bill_amount) = '90+ Days'
        ) AS days_90_plus_count
      FROM invoices
-     WHERE outstanding_balance > 0`
+     WHERE outstanding_balance > 0 AND property_name IS DISTINCT FROM 'Internal'`
   );
   return rows[0];
 }
@@ -170,9 +249,34 @@ export async function getTenantSummary() {
        )                                                 AS collection_pct
      FROM invoices i
      LEFT JOIN tenants t ON t.id = i.tenant_id
+     WHERE i.property_name IS DISTINCT FROM 'Internal'
      GROUP BY i.tenant_name, i.property_name, i.category, t.unit_no, t.phone
      ORDER BY total_outstanding DESC, max_overdue_days DESC
      LIMIT 20`
+  );
+  return rows;
+}
+
+export async function getPropertySummary() {
+  const { rows } = await pool.query(
+    `SELECT
+       p.name AS property_name,
+       COUNT(DISTINCT t.id) AS tenant_count,
+       COALESCE(SUM(i.bill_amount), 0) AS total_billed,
+       COALESCE(SUM(i.amount_collected), 0) AS total_collected,
+       COALESCE(SUM(i.outstanding_balance), 0) AS total_outstanding,
+       ROUND(
+         CASE WHEN SUM(i.bill_amount) > 0
+           THEN (SUM(i.amount_collected) / SUM(i.bill_amount)) * 100
+           ELSE 0
+         END, 1
+       ) AS collection_pct
+     FROM properties p
+     LEFT JOIN tenants t ON t.property_id = p.id AND t.is_active = TRUE
+     LEFT JOIN invoices i ON i.property_id = p.id
+     WHERE p.name IS DISTINCT FROM 'Internal' AND p.is_active = TRUE
+     GROUP BY p.name
+     ORDER BY total_outstanding DESC, p.name ASC`
   );
   return rows;
 }
@@ -191,6 +295,7 @@ export async function getDashboardAlerts() {
        FROM invoices
        WHERE outstanding_balance > 0
          AND due_date < CURRENT_DATE
+         AND property_name IS DISTINCT FROM 'Internal'
        GROUP BY tenant_name, property_name
        ORDER BY overdue_days DESC
        LIMIT 5`
@@ -201,14 +306,15 @@ export async function getDashboardAlerts() {
       `SELECT
          t.name  AS tenant_name,
          p.name  AS property_name,
-         t.lease_end,
-         (t.lease_end - CURRENT_DATE) AS days_left
+         (t.lease_start + (t.leased_period * INTERVAL '1 month'))::date AS lease_end,
+         ((t.lease_start + (t.leased_period * INTERVAL '1 month'))::date - CURRENT_DATE) AS days_left
        FROM tenants t
        LEFT JOIN properties p ON p.id = t.property_id
-       WHERE t.lease_end IS NOT NULL
+       WHERE t.leased_period IS NOT NULL AND t.lease_start IS NOT NULL
          AND t.is_active = TRUE
-         AND t.lease_end BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '60 days'
-       ORDER BY t.lease_end ASC
+         AND (p.name IS DISTINCT FROM 'Internal')
+         AND (t.lease_start + (t.leased_period * INTERVAL '1 month')) BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '60 days'
+       ORDER BY (t.lease_start + (t.leased_period * INTERVAL '1 month')) ASC
        LIMIT 5`
     ),
 
@@ -224,6 +330,7 @@ export async function getDashboardAlerts() {
        FROM invoices
        WHERE outstanding_balance > 0
          AND (CURRENT_DATE - due_date) > 60
+         AND property_name IS DISTINCT FROM 'Internal'
        ORDER BY (CURRENT_DATE - due_date) DESC
        LIMIT 5`
     ),
@@ -240,6 +347,7 @@ export async function getDashboardAlerts() {
        WHERE outstanding_balance > 0
          AND amount_collected   = 0
          AND (CURRENT_DATE - due_date) > 30
+         AND property_name IS DISTINCT FROM 'Internal'
        GROUP BY tenant_name, property_name
        ORDER BY overdue_days DESC
        LIMIT 5`

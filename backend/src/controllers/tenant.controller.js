@@ -10,12 +10,12 @@ export async function getAllTenants(req, res) {
       p.name  AS property_name,
       p.city  AS property_city,
       CASE
-        WHEN t.lease_end IS NULL                              THEN 'No Lease'
-        WHEN t.lease_end < CURRENT_DATE                      THEN 'Expired'
-        WHEN t.lease_end <= CURRENT_DATE + INTERVAL '30 days' THEN 'Expiring Soon'
+        WHEN t.leased_period IS NULL OR t.lease_start IS NULL THEN 'No Lease'
+        WHEN (t.lease_start + (t.leased_period * INTERVAL '1 month')) < CURRENT_DATE THEN 'Expired'
+        WHEN (t.lease_start + (t.leased_period * INTERVAL '1 month')) <= CURRENT_DATE + INTERVAL '30 days' THEN 'Expiring Soon'
         ELSE 'Active'
       END AS lease_status,
-      (t.lease_end - CURRENT_DATE) AS days_to_expiry,
+      ((t.lease_start + (t.leased_period * INTERVAL '1 month'))::date - CURRENT_DATE) AS days_to_expiry,
       -- escalation status live
       CASE
         WHEN t.escalation_due_date IS NULL        THEN 'No Escalation'
@@ -93,49 +93,51 @@ export async function getTenantById(req, res) {
     `SELECT * FROM tenant_categories WHERE tenant_id = $1 AND is_active = TRUE`,
     [req.params.id]
   );
-  
+
   const unitRes = await pool.query(
     `SELECT id FROM units WHERE tenant_id = $1 AND is_active = TRUE`,
     [req.params.id]
   );
-  
-  res.json({ 
-    success: true, 
-    data: { 
-      ...rows[0], 
+
+  res.json({
+    success: true,
+    data: {
+      ...rows[0],
       categories: cats.rows,
       unit_ids: unitRes.rows.map(u => u.id)
-    } 
+    }
   });
 }
 
 export async function createTenant(req, res) {
   const {
     property_id, name, email, phone, gstin, unit_no,
-    lease_start, lease_end, monthly_rent, security_deposit,
+    lease_start, lock_in_period, leased_period, monthly_rent, security_deposit,
     tenant_area, rate_per_sft, cam_amount,
     escalation_pct, escalation_due_date, escalation_new_rent,
     escalation_applied, is_active, unit_ids, attachment_url
   } = req.body;
 
-  const prop = await pool.query(
-    `SELECT id FROM properties WHERE id = $1`, [property_id]
-  );
-  if (!prop.rows.length)
-    return res.status(404).json({ success: false, message: 'Property not found' });
+  if (property_id) {
+    const prop = await pool.query(
+      `SELECT id FROM properties WHERE id = $1`, [property_id]
+    );
+    if (!prop.rows.length)
+      return res.status(404).json({ success: false, message: 'Property not found' });
+  }
 
   const { rows } = await pool.query(
     `INSERT INTO tenants
        (property_id, name, email, phone, gstin, unit_no,
-        lease_start, lease_end, monthly_rent, security_deposit,
+        lease_start, lock_in_period, leased_period, monthly_rent, security_deposit,
         tenant_area, rate_per_sft, cam_amount,
         escalation_pct, escalation_due_date, escalation_new_rent,
         escalation_applied, is_active, attachment_url)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
      RETURNING *`,
     [
-      property_id, name, email, phone, gstin, unit_no,
-      lease_start || null, lease_end || null,
+      property_id || null, name, email, phone, gstin, unit_no,
+      lease_start || null, lock_in_period || null, leased_period || null,
       monthly_rent || 0, security_deposit || 0,
       tenant_area || null, rate_per_sft || null, cam_amount || 0,
       escalation_pct || null,
@@ -146,7 +148,7 @@ export async function createTenant(req, res) {
       attachment_url || null,
     ]
   );
-  
+
   const newTenant = rows[0];
 
   // Update units if provided
@@ -169,10 +171,18 @@ export async function updateTenant(req, res) {
   const fields = { ...req.body };
   const unit_ids = fields.unit_ids;
   delete fields.unit_ids; // Don't try to update unit_ids on the tenants table directly
-  
+
   if (fields.lease_start === '') fields.lease_start = null;
   if (fields.lease_end === '') fields.lease_end = null;
+  if (fields.lock_in_period === '') fields.lock_in_period = null;
+  if (fields.leased_period === '') fields.leased_period = null;
   if (fields.escalation_due_date === '') fields.escalation_due_date = null;
+  if (fields.property_id === '') fields.property_id = null;
+
+  // If user updates escalation info manually, reset applied status
+  if (fields.escalation_due_date || fields.escalation_pct || fields.escalation_new_rent) {
+    fields.escalation_applied = false;
+  }
 
   const keys = Object.keys(fields);
   if (!keys.length)
@@ -188,12 +198,12 @@ export async function updateTenant(req, res) {
   );
   if (!rows.length)
     return res.status(404).json({ success: false, message: 'Tenant not found' });
-    
+
   // If unit_ids are provided, update the units
   if (unit_ids !== undefined) {
     // First, clear tenant_id from all units currently assigned to this tenant
     await pool.query(`UPDATE units SET tenant_id = NULL WHERE tenant_id = $1`, [req.params.id]);
-    
+
     // Then assign the new units
     if (Array.isArray(unit_ids) && unit_ids.length > 0) {
       const unitPlaceholders = unit_ids.map((_, i) => `$${i + 2}`).join(',');
@@ -216,7 +226,7 @@ export async function deleteTenant(req, res) {
   );
   if (!rows.length)
     return res.status(404).json({ success: false, message: 'Tenant not found' });
-    
+
   await logAudit(req.user, 'DELETE', 'TENANT', req.params.id, { deleted: true });
 
   res.json({ success: true, message: 'Tenant completely deleted' });
@@ -272,6 +282,12 @@ export async function upsertTenantCategories(req, res) {
 
 // ─── Escalation tracker ───────────────────────────────────────────────────────
 export async function getEscalationTracker(req, res) {
+  // Self-heal: If any tenant has an active due date but is stuck as 'Applied', reset them.
+  await pool.query(
+    `UPDATE tenants SET escalation_applied = FALSE
+     WHERE escalation_applied = TRUE AND escalation_due_date IS NOT NULL`
+  );
+
   const { rows } = await pool.query(
     `SELECT
        t.id,
@@ -301,6 +317,7 @@ export async function getEscalationTracker(req, res) {
      LEFT JOIN properties p ON p.id = t.property_id
      WHERE t.is_active = TRUE
        AND t.escalation_due_date IS NOT NULL
+       AND t.escalation_due_date <= CURRENT_DATE + INTERVAL '60 days'
      ORDER BY
        CASE
          WHEN t.escalation_due_date < CURRENT_DATE THEN 1
@@ -315,20 +332,37 @@ export async function getEscalationTracker(req, res) {
 
 export async function applyEscalation(req, res) {
   const { id } = req.params;
+  const { next_due_date } = req.body;
 
   const tenantRes = await pool.query(
     `SELECT * FROM tenants WHERE id = $1`, [id]
   );
+  if (!tenantRes.rows.length) return res.status(404).json({ success: false, message: 'Tenant not found' });
+  const tenant = tenantRes.rows[0];
+
   const { rows } = await pool.query(
     `UPDATE tenants SET
        monthly_rent = escalation_new_rent,
-       escalation_applied = TRUE,
+       escalation_applied = FALSE,
+       escalation_new_rent = escalation_new_rent * (1 + (COALESCE(escalation_pct, 0) / 100.0)),
+       escalation_due_date = $2,
        updated_at = NOW()
      WHERE id = $1 AND escalation_new_rent IS NOT NULL
      RETURNING *`,
-    [id]
+    [id, next_due_date || null]
   );
-  if (!rows.length) return res.status(404).json({ success: false, message: 'Tenant or escalation data not found' });
+  if (!rows.length) return res.status(404).json({ success: false, message: 'Escalation data not found or already applied' });
+
+  // Update Rent & CAM category if it exists
+  const newRent = parseFloat(rows[0].monthly_rent) || 0;
+  const camAmount = parseFloat(rows[0].cam_amount) || 0;
+  await pool.query(
+    `UPDATE tenant_categories 
+     SET amount = $1 
+     WHERE tenant_id = $2 AND category IN ('Rent & CAM', 'Rent') AND is_active = TRUE`,
+    [newRent + camAmount, id]
+  );
+
   res.json({ success: true, message: 'Escalation applied successfully', data: rows[0] });
 }
 

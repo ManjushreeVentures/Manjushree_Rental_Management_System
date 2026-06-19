@@ -13,12 +13,12 @@ export default function Modal({ open, onClose, title, children, width = 'max-w-l
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
       {/* backdrop */}
-      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
       {/* panel */}
-      <div className={`relative w-full ${width} max-h-[90vh] flex flex-col rounded-t-3xl sm:rounded-2xl bg-white/95 backdrop-blur-md shadow-2xl transition-all`}>
+      <div className={`relative w-full ${width} max-h-[90vh] flex flex-col rounded-t-3xl sm:rounded-2xl bg-white shadow-xl transition-all border border-slate-200 animate-in fade-in zoom-in-95 duration-200`}>
         {/* Mobile handle indicator */}
         <div className="absolute left-1/2 -top-3 w-12 h-1.5 -translate-x-1/2 rounded-full bg-white/40 sm:hidden"></div>
-        
+
         <div className="flex items-center justify-between border-b border-slate-200/60 px-6 py-4 shrink-0">
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
           <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-slate-100 transition-colors">

@@ -6,7 +6,9 @@ import {
 } from 'lucide-react';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import ToastProvider from './components/ui/ToastProvider';
 import { authApi } from './api/auth.api';
+import InlineAlert from './components/ui/InlineAlert';
 import Login from './pages/Login';
 import Dashboard    from './pages/Dashboard';
 import Properties   from './pages/Properties';
@@ -36,9 +38,9 @@ const NAV = [
 function ComingSoon({ title }) {
   return (
     <div className="flex flex-col items-center justify-center py-32 text-center">
-      <div className="rounded-2xl border-2 border-dashed border-slate-200 px-16 py-12">
-        <p className="text-2xl font-bold text-slate-300">{title}</p>
-        <p className="mt-2 text-sm text-slate-400">Coming in the next module</p>
+      <div className="rounded-xl border border-slate-200 bg-white p-12 shadow-sm max-w-md w-full mx-auto">
+        <p className="text-xl font-bold text-slate-800">{title}</p>
+        <p className="mt-2 text-sm text-slate-500">This module is currently under development.</p>
       </div>
     </div>
   );
@@ -56,7 +58,7 @@ function Sidebar({ active, onChange, open, onClose }) {
       )}
 
       <aside className={`fixed inset-y-0 left-0 z-30 flex w-64 flex-col
-        bg-gradient-to-b from-teal-950 to-slate-900 shadow-2xl lg:shadow-none transition-transform duration-300 ease-in-out
+        bg-slate-900 lg:shadow-none transition-transform duration-300 ease-in-out
         ${open ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:static lg:z-auto`}>
 
         {/* logo */}
@@ -120,10 +122,10 @@ function Topbar({ page, onMenuClick }) {
           className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden">
           <Menu className="h-5 w-5" />
         </button>
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <span className="font-medium text-slate-700">Manjushree Ventures</span>
-          <ChevronRight className="h-3.5 w-3.5" />
-          <span className="font-semibold text-teal-700">{label}</span>
+        <div className="flex items-center gap-2 text-sm text-slate-500 truncate min-w-0">
+          <span className="font-medium text-slate-700 hidden lg:inline shrink-0">Manjushree Ventures</span>
+          <ChevronRight className="h-3.5 w-3.5 hidden lg:inline shrink-0" />
+          <span className="font-semibold text-teal-700 truncate">{label}</span>
         </div>
         
         {/* User info and actions */}
@@ -177,13 +179,23 @@ function ChangePasswordModal({ onClose }) {
     e.preventDefault();
     setError('');
     setSuccess('');
+
+    if (newPassword.length < 8) {
+      setError('New password must be at least 8 characters.');
+      return;
+    }
+    if (currentPassword === newPassword) {
+      setError('New password must be different from current password.');
+      return;
+    }
+
     setLoading(true);
 
     try {
       const response = await authApi.changePassword(currentPassword, newPassword);
       if (response.success) {
         setSuccess('Password changed successfully!');
-        setTimeout(() => onClose(), 1500);
+        setTimeout(() => onClose(), 2500);
       } else {
         setError(response.message || 'Failed to change password');
       }
@@ -195,8 +207,14 @@ function ChangePasswordModal({ onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl relative animate-in fade-in zoom-in duration-200">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+      onClick={onClose}
+    >
+      <div 
+        className="w-full max-w-sm rounded-xl bg-white p-6 shadow-sm relative animate-in fade-in zoom-in duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
         <button
           onClick={onClose}
           className="absolute right-4 top-4 text-slate-400 hover:text-slate-600"
@@ -253,17 +271,8 @@ function ChangePasswordModal({ onClose }) {
             </div>
           </div>
 
-          {error && (
-            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600 border border-red-100">
-              {error}
-            </div>
-          )}
-
-          {success && (
-            <div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-600 border border-emerald-100">
-              {success}
-            </div>
-          )}
+          <InlineAlert variant="error">{error}</InlineAlert>
+          <InlineAlert variant="success">{success}</InlineAlert>
 
           <button
             type="submit"
@@ -290,7 +299,9 @@ function PageRouter({ page, setPage }) {
     case 'upload':      return <Upload       />;
     case 'reports':     return <Reports      />;
     case 'audit-logs':  return <AuditLogs    />;
-    default:            return <Dashboard    onNavigate={setPage} />;
+    default:
+      console.warn(`Unknown page: "${page}" — falling back to dashboard`);
+      return <Dashboard onNavigate={setPage} />;
   }
 }
 
@@ -325,7 +336,7 @@ function AppContent() {
       />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar page={page} onMenuClick={() => setSidebarOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 custom-scrollbar">
+        <main className="flex-1 overflow-y-auto px-4 pt-3 pb-4 sm:px-6 sm:pt-4 sm:pb-6 md:px-8 md:pt-5 md:pb-8 custom-scrollbar">
           <PageRouter page={page} setPage={setPage} />
         </main>
       </div>
@@ -336,7 +347,9 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
     </AuthProvider>
   );
 }

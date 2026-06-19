@@ -4,104 +4,25 @@ import {
   Clock, ChevronDown, ChevronUp,
   Users, Building2, Eye, Mail
 } from 'lucide-react';
-import Button       from '../components/ui/Button';
+import Button from '../components/ui/Button';
 import { invoiceApi } from '../api/invoice.api';
-import PageHeader   from '../components/ui/PageHeader';
-import { Table }    from '../components/ui/Table';
-import Modal        from '../components/ui/Modal';
-import StatusBadge  from '../components/ui/StatusBadge';
-import Pagination   from '../components/ui/Pagination';
-import FilterBar    from '../components/ui/FilterBar';
+import PageHeader from '../components/ui/PageHeader';
+import { Table } from '../components/ui/Table';
+import Modal from '../components/ui/Modal';
+import StatusBadge from '../components/ui/StatusBadge';
+import Pagination from '../components/ui/Pagination';
+import FilterBar from '../components/ui/FilterBar';
 import { useAsync } from '../hooks/useAsync';
 import { receivableApi } from '../api/receivable.api';
 import { formatCurrency, formatDate, formatBillingMonth } from '../utils/format';
 import ConfirmModal from '../components/ui/ConfirmModal';
+import EmailPreviewModal from '../components/ui/EmailPreviewModal';
+import AgingStrip from '../components/ui/AgingStrip';
+import { useToast } from '../contexts/ToastContext';
+import { agingConfig } from '../utils/constants';
 
-const AGING_BUCKETS = ['Current', '1-30 Days', '31-60 Days', '61-90 Days', '90+ Days'];
 
-const agingConfig = [
-  { key: 'current_amt',  label: 'Current',    count: 'current_count',
-    color: 'bg-emerald-500', text: 'text-emerald-700', bg: 'bg-emerald-50',
-    border: 'border-emerald-200' },
-  { key: 'days_1_30',   label: '1–30 Days',  count: 'days_1_30_count',
-    color: 'bg-yellow-400',  text: 'text-yellow-700',  bg: 'bg-yellow-50',
-    border: 'border-yellow-200' },
-  { key: 'days_31_60',  label: '31–60 Days', count: 'days_31_60_count',
-    color: 'bg-orange-500',  text: 'text-orange-700',  bg: 'bg-orange-50',
-    border: 'border-orange-200' },
-  { key: 'days_61_90',  label: '61–90 Days', count: 'days_61_90_count',
-    color: 'bg-red-500',     text: 'text-red-700',     bg: 'bg-red-50',
-    border: 'border-red-200' },
-  { key: 'days_90_plus',label: '90+ Days',   count: 'days_90_plus_count',
-    color: 'bg-red-800',     text: 'text-red-900',     bg: 'bg-red-100',
-    border: 'border-red-300' },
-];
-
-// ─── Aging Visual Strip ───────────────────────────────────────────────────────
-function AgingStrip({ data }) {
-  if (!data) return null;
-  const total = parseFloat(data.total_outstanding) || 1;
-
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white/60 backdrop-blur-md shadow-sm mb-6 p-1">
-      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4 bg-white/80 rounded-t-xl">
-        <div>
-          <h2 className="font-semibold text-slate-900 text-lg flex items-center gap-2">
-            <Clock className="h-5 w-5 text-indigo-500" />
-            Aging Analysis
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Total Outstanding: <span className="font-bold text-slate-800">{formatCurrency(data.total_outstanding)}</span>
-            <span className="mx-2 text-slate-300">|</span>
-            {data.total_invoices} invoices · {data.total_tenants} tenants
-          </p>
-        </div>
-      </div>
-
-      <div className="p-5 bg-white/40 rounded-b-xl">
-        {/* Modern Segmented Progress Bar */}
-        <div className="flex h-5 w-full overflow-hidden rounded-full bg-slate-100/50 shadow-inner gap-1 p-0.5">
-          {agingConfig.map((a) => {
-            const pct = (parseFloat(data[a.key]) / total) * 100;
-            if (pct < 0.5) return null;
-            return (
-              <div
-                key={a.key}
-                className={`${a.color} h-full rounded-full transition-all shadow-sm`}
-                style={{ width: `${pct}%` }}
-                title={`${a.label}: ${formatCurrency(data[a.key])}`}
-              />
-            );
-          })}
-        </div>
-
-        {/* Premium Bucket Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mt-5">
-          {agingConfig.map((a) => {
-            const pct = (parseFloat(data[a.key]) / total) * 100;
-            return (
-              <div key={a.key} className={`relative overflow-hidden rounded-xl border border-slate-100 ${a.bg} p-4 hover:shadow-md transition-shadow group bg-opacity-40 backdrop-blur-sm`}>
-                <div className={`absolute top-0 left-0 w-full h-1 ${a.color} opacity-70 group-hover:opacity-100 transition-opacity`} />
-                <p className="text-sm font-medium text-slate-600 mb-1">{a.label}</p>
-                <p className={`text-xl font-extrabold ${a.text}`}>
-                  {formatCurrency(data[a.key])}
-                </p>
-                <div className="mt-2 flex items-center justify-between">
-                  <p className="text-[11px] font-semibold text-slate-500 bg-white/70 px-2 py-0.5 rounded-full shadow-sm">
-                    {data[a.count]} inv
-                  </p>
-                  <p className="text-xs font-bold text-slate-400">
-                    {pct.toFixed(1)}%
-                  </p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
+// ─── Shared Components Imported ────────────────────────────────────────────────
 
 // ─── Collection Trend Table ───────────────────────────────────────────────────
 function CollectionTrend({ data }) {
@@ -117,7 +38,7 @@ function CollectionTrend({ data }) {
       >
         <h2 className="font-semibold text-slate-900">Collection Trend (Last 12 Months)</h2>
         {open
-          ? <ChevronUp   className="h-4 w-4 text-slate-400" />
+          ? <ChevronUp className="h-4 w-4 text-slate-400" />
           : <ChevronDown className="h-4 w-4 text-slate-400" />}
       </button>
 
@@ -125,7 +46,7 @@ function CollectionTrend({ data }) {
         <div className="border-t border-slate-200 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase">
+              <tr className="bg-gradient-to-r from-teal-50 to-blue-50/50 text-xs font-semibold text-slate-600 uppercase border-b border-slate-200">
                 <th className="px-5 py-3 text-left">Month</th>
                 <th className="px-4 py-3 text-right">Billed</th>
                 <th className="px-4 py-3 text-right">Collected</th>
@@ -137,7 +58,7 @@ function CollectionTrend({ data }) {
             <tbody className="divide-y divide-slate-100">
               {data.map((row) => (
                 <tr key={row.billing_month}
-                  className="hover:bg-slate-50/60 transition-colors">
+                  className="hover:bg-blue-50/60 transition-colors">
                   <td className="px-5 py-3 font-medium text-slate-800">
                     {formatBillingMonth(row.billing_month)}
                   </td>
@@ -159,8 +80,8 @@ function CollectionTrend({ data }) {
                             ${parseFloat(row.collection_pct) >= 90
                               ? 'bg-emerald-500'
                               : parseFloat(row.collection_pct) >= 60
-                              ? 'bg-yellow-400'
-                              : 'bg-red-500'}`}
+                                ? 'bg-yellow-400'
+                                : 'bg-red-500'}`}
                           style={{ width: `${Math.min(row.collection_pct, 100)}%` }}
                         />
                       </div>
@@ -168,8 +89,8 @@ function CollectionTrend({ data }) {
                         ${parseFloat(row.collection_pct) >= 90
                           ? 'text-emerald-700'
                           : parseFloat(row.collection_pct) >= 60
-                          ? 'text-yellow-700'
-                          : 'text-red-600'}`}>
+                            ? 'text-yellow-700'
+                            : 'text-red-600'}`}>
                         {row.collection_pct}%
                       </span>
                     </div>
@@ -193,9 +114,9 @@ function AlertsPanel({ data }) {
   if (!data) return null;
 
   const tabs = [
-    { id: 'overdue',  label: 'Overdue',          count: data.overdueByTenant?.length  },
-    { id: 'expiry',   label: 'Lease Expiry',      count: data.leasesExpiring?.length   },
-    { id: 'nopay',    label: 'No Payment 30d+',   count: data.noPayment30Plus?.length  },
+    { id: 'overdue', label: 'Overdue', count: data.overdueByTenant?.length },
+    { id: 'expiry', label: 'Lease Expiry', count: data.leasesExpiring?.length },
+    { id: 'nopay', label: 'No Payment 30d+', count: data.noPayment30Plus?.length },
   ];
 
   return (
@@ -315,18 +236,21 @@ function AlertsPanel({ data }) {
 }
 
 // ─── Tenant Drill-down Modal ──────────────────────────────────────────────────
-function TenantDrilldown({ data, loading, tenantName }) {
+function TenantDrilldown({ data, loading, tenantName, tenantId }) {
+  const { showToast } = useToast();
   const [sending, setSending] = useState(false);
-  const [toastMsg, setToastMsg] = useState(null);
   const [localEmail, setLocalEmail] = useState('');
-  const [confirmConfig, setConfirmConfig] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [hasExistingEmail, setHasExistingEmail] = useState(false);
 
   // Update localEmail when data loads
   useEffect(() => {
     if (data?.invoices?.[0]?.tenant_email) {
       setLocalEmail(data.invoices[0].tenant_email);
+      setHasExistingEmail(true);
     } else {
       setLocalEmail('');
+      setHasExistingEmail(false);
     }
   }, [data]);
 
@@ -336,83 +260,61 @@ function TenantDrilldown({ data, loading, tenantName }) {
   if (!data) return null;
   const { summary, invoices } = data;
 
-  const handleSendReminder = async (emailToUse) => {
-    if (!emailToUse) return;
-    setSending(true);
-    try {
-      const res = await invoiceApi.sendReminders({ 
-        tenant_name: tenantName,
-        override_email: emailToUse
-      });
-      setToastMsg(res.data?.message || 'Reminder sent successfully');
-      setLocalEmail(emailToUse); // Update local state so the input goes away
-      setTimeout(() => setToastMsg(null), 4000);
-    } catch (e) {
-      setToastMsg('Error sending reminder');
-      setTimeout(() => setToastMsg(null), 4000);
-    } finally {
-      setSending(false);
-    }
+  const handleReminderSent = (emailUsed) => {
+    setLocalEmail(emailUsed);
+    setHasExistingEmail(true);
   };
 
   return (
     <div className="space-y-5">
-      {confirmConfig && (
-        <ConfirmModal
-          open={!!confirmConfig}
-          onClose={() => setConfirmConfig(null)}
-          title={confirmConfig.title}
-          message={confirmConfig.message}
-          onConfirm={confirmConfig.onConfirm}
-        />
-      )}
+      <EmailPreviewModal
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        tenantId={tenantId}
+        tenantName={tenantName}
+        localEmail={localEmail}
+        onSent={handleReminderSent}
+      />
 
       {/* Action Bar */}
       <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
         <div className="flex-1">
-          {toastMsg && <span className="text-sm text-emerald-600 font-medium">{toastMsg}</span>}
-          {!toastMsg && !localEmail && (
+          {!hasExistingEmail && (
             <span className="text-sm text-orange-600 font-medium flex items-center gap-2">
               <AlertTriangle className="h-4 w-4" /> No email saved for this tenant.
             </span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-2">
-          {!localEmail ? (
+          {!hasExistingEmail ? (
             <div className="flex items-center gap-2">
-              <input 
-                type="email" 
-                id="missing-email-input"
-                placeholder="Enter email address..." 
+              <input
+                type="email"
+                value={localEmail}
+                onChange={(e) => setLocalEmail(e.target.value)}
+                placeholder="Enter email address..."
                 className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 w-64"
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && e.target.value) handleSendReminder(e.target.value);
+                  if (e.key === 'Enter' && localEmail) {
+                    setPreviewOpen(true);
+                  }
                 }}
               />
-              <Button 
-                variant="danger" 
-                loading={sending} 
+              <Button
+                variant="danger"
                 onClick={() => {
-                  const input = document.getElementById('missing-email-input');
-                  if (input && input.value) handleSendReminder(input.value);
+                  if (localEmail) setPreviewOpen(true);
                 }}
               >
-                <Mail className="h-4 w-4" /> Save & Send
+                <Mail className="h-4 w-4" /> Preview & Send
               </Button>
             </div>
           ) : (
-            <Button 
-              variant="danger" 
-              loading={sending} 
-              onClick={() => {
-                setConfirmConfig({
-                  title: 'Confirm Send',
-                  message: `Send an email reminder to ${tenantName} (${localEmail})?`,
-                  onConfirm: () => handleSendReminder(localEmail)
-                });
-              }}
+            <Button
+              variant="danger"
+              onClick={() => setPreviewOpen(true)}
             >
-              <Mail className="h-4 w-4" /> Send Reminder Email
+              <Mail className="h-4 w-4" /> Preview & Send Remainder
             </Button>
           )}
         </div>
@@ -422,10 +324,10 @@ function TenantDrilldown({ data, loading, tenantName }) {
       {summary && (
         <div className="grid grid-cols-2 gap-3">
           {[
-            { label: 'Total Billed',      value: formatCurrency(summary.total_billed),       cls: 'text-slate-900' },
-            { label: 'Total Collected',   value: formatCurrency(summary.total_collected),    cls: 'text-emerald-700' },
-            { label: 'Total Outstanding', value: formatCurrency(summary.total_outstanding),  cls: 'text-red-600' },
-            { label: 'Max Overdue',       value: `${summary.max_overdue_days ?? 0} days`,    cls: 'text-orange-700' },
+            { label: 'Total Billed', value: formatCurrency(summary.total_billed), cls: 'text-slate-900' },
+            { label: 'Total Collected', value: formatCurrency(summary.total_collected), cls: 'text-emerald-700' },
+            { label: 'Total Outstanding', value: formatCurrency(summary.total_outstanding), cls: 'text-red-600' },
+            { label: 'Max Overdue', value: `${summary.max_overdue_days ?? 0} days`, cls: 'text-orange-700' },
           ].map((c) => (
             <div key={c.label}
               className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -482,12 +384,14 @@ const defaultFilters = {
 };
 
 export default function Receivables() {
-  const [filters,       setFilters]       = useState(defaultFilters);
-  const [page,          setPage]          = useState(1);
-  const [drillTenant,   setDrillTenant]   = useState(null);
-  const [drillData,     setDrillData]     = useState(null);
-  const [drillLoading,  setDrillLoading]  = useState(false);
-  const [drillOpen,     setDrillOpen]     = useState(false);
+  const { showToast } = useToast();
+  const [filters, setFilters] = useState(defaultFilters);
+  const [page, setPage] = useState(1);
+  const [drillTenant, setDrillTenant] = useState(null);
+  const [drillTenantId, setDrillTenantId] = useState(null);
+  const [drillData, setDrillData] = useState(null);
+  const [drillLoading, setDrillLoading] = useState(false);
+  const [drillOpen, setDrillOpen] = useState(false);
 
   const { data: agingData } = useAsync(
     () => receivableApi.getAgingSummary(), []
@@ -504,32 +408,42 @@ export default function Receivables() {
   );
 
   const register = registerData?.data ?? [];
-  const meta     = registerData?.meta ?? {};
+  const meta = registerData?.meta ?? {};
 
   const updateFilter = (key, value) => {
     setFilters((f) => ({ ...f, [key]: value }));
     setPage(1);
   };
 
-  const openDrilldown = async (tenantName) => {
+  const openDrilldown = async (tenantId, tenantName) => {
     setDrillTenant(tenantName);
+    setDrillTenantId(tenantId);
     setDrillOpen(true);
     setDrillLoading(true);
     setDrillData(null);
     try {
-      const res = await receivableApi.getTenantOutstanding(tenantName);
+      const res = await receivableApi.getTenantOutstanding(tenantId);
       setDrillData(res.data);
-    } catch { setDrillData(null); }
+    } catch {
+      showToast('Failed to load tenant details', 'error');
+      setDrillData(null);
+    }
     finally { setDrillLoading(false); }
   };
 
   const filterConfig = [
-    { key: 'search',        type: 'text',   value: filters.search,
-      placeholder: 'Search tenant or property…' },
-    { key: 'aging_bucket',  type: 'select', value: filters.aging_bucket,
-      placeholder: 'All Aging', options: AGING_BUCKETS },
-    { key: 'category',      type: 'select',   value: filters.category,
-      placeholder: 'All Categories', options: ['Rent & CAM', 'Water Charges', 'Power Charges', 'Infrastructural'] },
+    {
+      key: 'search', type: 'text', value: filters.search,
+      placeholder: 'Search tenant or property…'
+    },
+    {
+      key: 'aging_bucket', type: 'select', value: filters.aging_bucket,
+      placeholder: 'All Aging', options: agingConfig.map(a => a.label)
+    },
+    {
+      key: 'category', type: 'select', value: filters.category,
+      placeholder: 'All Categories', options: ['Rent & CAM', 'Water Charges', 'Power Charges', 'Infrastructural']
+    },
   ];
 
   const columns = [
@@ -538,7 +452,7 @@ export default function Receivables() {
       render: (r) => (
         <div>
           <button
-            onClick={() => openDrilldown(r.tenant_name)}
+            onClick={() => openDrilldown(r.tenant_id, r.tenant_name)}
             className="font-semibold text-blue-600 hover:text-blue-800 transition-colors text-left"
           >
             {r.tenant_name}
@@ -557,8 +471,10 @@ export default function Receivables() {
         </span>
       ),
     },
-    { key: 'billing_month', label: 'Month', className: 'hidden lg:table-cell',
-      render: (r) => <span className="text-xs text-slate-600">{formatBillingMonth(r.billing_month)}</span> },
+    {
+      key: 'billing_month', label: 'Month', className: 'hidden lg:table-cell',
+      render: (r) => <span className="text-xs text-slate-600">{formatBillingMonth(r.billing_month)}</span>
+    },
     {
       key: 'due_date', label: 'Due Date',
       render: (r) => (
@@ -607,12 +523,22 @@ export default function Receivables() {
         );
       },
     },
-    { key: 'status', label: 'Status', className: 'hidden sm:table-cell',
-      render: (r) => <StatusBadge status={r.status} /> },
+    {
+      key: 'status', label: 'Status', className: 'hidden sm:table-cell',
+      render: (r) => <StatusBadge status={r.status} />
+    },
     {
       key: 'actions', label: '',
       render: (r) => (
-        <div className="flex items-center justify-end w-4">
+        <div className="flex items-center justify-end">
+          <button
+            onClick={() => openDrilldown(r.tenant_id, r.tenant_name)}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold
+              text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100
+              border border-blue-200 hover:border-blue-300 rounded-lg transition"
+          >
+            <Mail className="h-3 w-3" /> Reminder
+          </button>
         </div>
       ),
     },
@@ -659,7 +585,7 @@ export default function Receivables() {
           : <Table columns={columns} data={register} loading={registerLoading} />
         }
         <Pagination
-          page={meta.page   ?? 1}
+          page={meta.page ?? 1}
           pages={meta.pages ?? 1}
           total={meta.total ?? 0}
           limit={50}
@@ -674,7 +600,7 @@ export default function Receivables() {
         title={`Tenant: ${drillTenant ?? ''}`}
         width="max-w-2xl"
       >
-        <TenantDrilldown data={drillData} loading={drillLoading} tenantName={drillTenant} />
+        <TenantDrilldown data={drillData} loading={drillLoading} tenantName={drillTenant} tenantId={drillTenantId} />
       </Modal>
     </div>
   );

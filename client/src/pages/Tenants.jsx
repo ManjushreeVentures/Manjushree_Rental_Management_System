@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Plus, Users, Pencil, PowerOff, Eye, Trash2,
   AlertTriangle, Clock, TrendingUp,
-  ChevronDown, ChevronUp, CheckCircle2,
+  ChevronDown, ChevronUp, CheckCircle2, Phone, Mail, FileText, X
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { Table } from '../components/ui/Table';
@@ -13,36 +13,22 @@ import StatusBadge from '../components/ui/StatusBadge';
 import { useAsync } from '../hooks/useAsync';
 import { tenantApi } from '../api/tenant.api';
 import { propertyApi } from '../api/property.api';
+import { unitApi } from '../api/unit.api';
 import { formatCurrency, formatDate } from '../utils/format';
-import PinModal from '../components/PinModal';
 import ConfirmModal from '../components/ui/ConfirmModal';
+import { useToast } from '../contexts/ToastContext';
+import PinModal from '../components/PinModal';
 
-// ─── Escalation status badge ──────────────────────────────────────────────────
-const escalationStyles = {
-  'Overdue': 'bg-red-100    text-red-700    ring-red-200',
-  'Due Soon': 'bg-orange-100 text-orange-700 ring-orange-200',
-  'Upcoming': 'bg-blue-50    text-blue-600   ring-blue-200',
-  'Applied': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  'No Escalation': 'bg-slate-100  text-slate-500  ring-slate-200',
-};
+function getEscalationIcon(status) {
+  if (status === 'Overdue') return AlertTriangle;
+  if (status === 'Due Soon') return Clock;
+  if (status === 'Applied') return CheckCircle2;
+  return null;
+}
 
-function EscalationBadge({ status, daysLeft }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5
-        text-xs font-medium ring-1 ring-inset ${escalationStyles[status] ?? escalationStyles['No Escalation']}`}>
-        {status === 'Overdue' && <AlertTriangle className="h-3 w-3" />}
-        {status === 'Due Soon' && <Clock className="h-3 w-3" />}
-        {status === 'Applied' && <CheckCircle2 className="h-3 w-3" />}
-        {status}
-      </span>
-      {daysLeft !== null && daysLeft !== undefined && status !== 'Applied' && (
-        <span className="text-xs text-slate-400">
-          {daysLeft >= 0 ? `${daysLeft}d left` : `${Math.abs(daysLeft)}d overdue`}
-        </span>
-      )}
-    </div>
-  );
+function getLeaseIcon(status) {
+  if (status === 'Expiring Soon') return AlertTriangle;
+  return null;
 }
 
 // ─── Escalation Tracker Panel ─────────────────────────────────────────────────
@@ -80,13 +66,10 @@ function EscalationTracker({ data, onApply, loading }) {
         <div className="overflow-x-auto rounded-xl border border-teal-100 bg-white shadow-sm">
           <table className="w-full text-sm whitespace-nowrap min-w-[800px]">
             <thead>
-              <tr className="bg-teal-50/80 text-xs font-semibold text-teal-800 uppercase tracking-wider">
+              <tr className="bg-gradient-to-r from-teal-50 to-blue-50/50 text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-200">
                 <th className="px-4 py-3 text-left">Tenant</th>
                 <th className="px-4 py-3 text-left">Property</th>
-                <th className="px-4 py-3 text-right">Area (sft)</th>
                 <th className="px-4 py-3 text-right">Current Rent</th>
-                <th className="px-4 py-3 text-right">CAM</th>
-                <th className="px-4 py-3 text-right">Total</th>
                 <th className="px-4 py-3 text-center">Escalation %</th>
                 <th className="px-4 py-3 text-center">Due Date</th>
                 <th className="px-4 py-3 text-right">New Rent</th>
@@ -97,20 +80,12 @@ function EscalationTracker({ data, onApply, loading }) {
             </thead>
             <tbody className="divide-y divide-teal-50 bg-white/40">
               {data.map((r) => (
-                <tr key={r.id} className="hover:bg-teal-50/60 transition-colors">
+                <tr key={r.id} className="hover:bg-blue-50/60 transition-colors">
                   <td className="px-4 py-3 font-medium text-slate-900">{r.tenant_name}</td>
                   <td className="px-4 py-3 text-slate-600 text-xs">{r.property_name}</td>
-                  <td className="px-4 py-3 text-right text-slate-600">
-                    {r.tenant_area ? Number(r.tenant_area).toLocaleString('en-IN') : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium text-slate-900">
-                    {formatCurrency(r.monthly_rent)}
-                  </td>
-                  <td className="px-4 py-3 text-right text-slate-600">
-                    {r.cam_amount > 0 ? formatCurrency(r.cam_amount) : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                    {formatCurrency(r.total_rent)}
+                  <td className="px-4 py-3 text-right">
+                    <p className="font-semibold text-slate-900">{formatCurrency(r.total_rent)}</p>
+                    <p className="text-[10px] text-slate-500">Rent: {formatCurrency(r.monthly_rent)} · CAM: {formatCurrency(r.cam_amount)}</p>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className="rounded-full bg-teal-100/80 text-teal-800
@@ -128,9 +103,10 @@ function EscalationTracker({ data, onApply, loading }) {
                     {r.escalation_diff > 0 ? `+${formatCurrency(r.escalation_diff)}` : '—'}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <EscalationBadge
+                    <StatusBadge
                       status={r.escalation_status}
-                      daysLeft={r.days_left}
+                      icon={getEscalationIcon(r.escalation_status)}
+                      sublabel={r.days_left !== null && r.days_left !== undefined && r.escalation_status !== 'Applied' ? (r.days_left >= 0 ? `${r.days_left}d left` : `${Math.abs(r.days_left)}d overdue`) : null}
                     />
                   </td>
                   <td className="px-4 py-3 text-center">
@@ -162,46 +138,90 @@ const AVAILABLE_CATEGORIES = [
 
 const empty = {
   property_id: '', name: '', email: '', phone: '', gstin: '',
-  unit_no: '', lease_start: '', lease_end: '',
+  unit_no: '', lease_start: '', lock_in_period: '', leased_period: '',
   monthly_rent: '', security_deposit: '',
   tenant_area: '', rate_per_sft: '', cam_amount: '',
   escalation_pct: '', escalation_due_date: '', escalation_new_rent: '',
   escalation_applied: false, is_active: true, categories: [],
-  file: null, attachment_url: null,
+  files: [], attachment_url: null, unit_ids: [],
 };
 
 function TenantForm({ initial = empty, properties = [], onSubmit, loading, onViewAttachment }) {
   const [form, setForm] = useState(() => {
     // Map categories from array of objects to array of strings for the checkboxes
     const catArray = initial.categories?.map(c => typeof c === 'string' ? c : c.category) || [];
-    
+
     // Auto-fill monthly_rent from category amounts if it's currently 0 or missing
     let derivedRent = initial.monthly_rent;
     if (!derivedRent && initial.categories?.length > 0) {
       derivedRent = initial.categories.reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0);
     }
 
+    const formatDt = (d) => d ? d.split('T')[0] : '';
+
     return {
       ...initial,
+      lease_start: formatDt(initial.lease_start),
+      lock_in_period: initial.lock_in_period || '',
+      leased_period: initial.leased_period || '',
+      escalation_due_date: formatDt(initial.escalation_due_date),
+      escalation_pct: initial.escalation_pct || '5.00',
       categories: catArray,
       monthly_rent: derivedRent || '',
+      unit_ids: initial.unit_ids || [],
     };
   });
   const [errors, setErrors] = useState({});
   const [showEsc, setShowEsc] = useState(false);
+  const [availableUnits, setAvailableUnits] = useState([]);
+
+  // Fetch available units/blocks when property changes
+  React.useEffect(() => {
+    if (form.property_id) {
+      unitApi.getAll({ property_id: form.property_id }).then(res => {
+        setAvailableUnits(res.data || []);
+      }).catch(err => console.error("Failed to load units", err));
+    } else {
+      setAvailableUnits([]);
+    }
+  }, [form.property_id]);
 
   const set = (k) => (e) => {
     const val = e.target.value;
     setForm((f) => {
       const updated = { ...f, [k]: val };
-      // auto-calculate new rent when pct changes
-      if ((k === 'escalation_pct' || k === 'monthly_rent') && updated.monthly_rent) {
+      // Bidirectional auto-calculation for rent escalation
+      if (k === 'escalation_pct' || k === 'monthly_rent') {
         const base = parseFloat(updated.monthly_rent) || 0;
-        const pct = parseFloat(updated.escalation_pct) || 0;
-        updated.escalation_new_rent = pct > 0
-          ? (base * (1 + pct / 100)).toFixed(2)
-          : updated.escalation_new_rent;
+        const pctStr = updated.escalation_pct;
+
+        if (pctStr === '' || pctStr === null) {
+          updated.escalation_new_rent = '';
+        } else if (base > 0) {
+          const pct = parseFloat(pctStr) || 0;
+          updated.escalation_new_rent = (base * (1 + pct / 100)).toFixed(2);
+        }
+      } else if (k === 'escalation_new_rent') {
+        const base = parseFloat(updated.monthly_rent) || 0;
+        const newRentStr = updated.escalation_new_rent;
+
+        if (newRentStr === '' || newRentStr === null) {
+          updated.escalation_pct = '';
+        } else if (base > 0) {
+          const newRent = parseFloat(newRentStr) || 0;
+          const diff = newRent - base;
+          const pct = (diff / base) * 100;
+          updated.escalation_pct = pct.toFixed(2);
+        }
+      } else if (k === 'lease_start') {
+        if (val && !updated.escalation_due_date) {
+          // Auto-calculate escalation_due_date as lease_start + 12 months
+          const d = new Date(val);
+          d.setMonth(d.getMonth() + 12);
+          updated.escalation_due_date = d.toISOString().split('T')[0];
+        }
       }
+
       return updated;
     });
   };
@@ -216,9 +236,24 @@ function TenantForm({ initial = empty, properties = [], onSubmit, loading, onVie
     });
   };
 
+  const toggleUnit = (unit) => {
+    setForm((f) => {
+      const isSelected = f.unit_ids?.includes(unit.id);
+      const newUnitIds = isSelected
+        ? (f.unit_ids || []).filter((id) => id !== unit.id)
+        : [...(f.unit_ids || []), unit.id];
+
+      const newUnitNo = availableUnits
+        .filter(u => newUnitIds.includes(u.id))
+        .map(u => u.name)
+        .join(', ');
+
+      return { ...f, unit_ids: newUnitIds, unit_no: newUnitNo };
+    });
+  };
+
   const validate = () => {
     const errs = {};
-    if (!form.property_id) errs.property_id = 'Required';
     if (!form.name.trim()) errs.name = 'Required';
     if (form.email && !/\S+@\S+\.\S+/.test(form.email))
       errs.email = 'Invalid email';
@@ -242,15 +277,30 @@ function TenantForm({ initial = empty, properties = [], onSubmit, loading, onVie
   };
 
   const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) setForm(f => ({ ...f, file }));
+    const selectedFiles = Array.from(e.target.files);
+    if (selectedFiles.length) {
+      setForm(f => ({ ...f, files: [...(f.files || []), ...selectedFiles] }));
+    }
+    e.target.value = null; // reset
+  };
+
+  const removeFile = (index) => {
+    setForm(f => ({ ...f, files: (f.files || []).filter((_, i) => i !== index) }));
+  };
+
+  const removeExistingAttachment = (url) => {
+    setForm(f => {
+      if (!f.attachment_url) return f;
+      const urls = f.attachment_url.split(',').filter(u => u !== url);
+      return { ...f, attachment_url: urls.length > 0 ? urls.join(',') : null };
+    });
   };
 
   return (
     <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1 custom-scrollbar">
       {/* Property */}
       <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-slate-600">Property *</label>
+        <label className="text-xs font-medium text-slate-600">Property</label>
         <select value={form.property_id} onChange={set('property_id')}
           className={`rounded-lg border px-3 py-2 text-sm outline-none transition-all
             focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 bg-white/80
@@ -269,7 +319,32 @@ function TenantForm({ initial = empty, properties = [], onSubmit, loading, onVie
           <Input label="Tenant Name *" value={form.name} onChange={set('name')}
             error={errors.name} placeholder="e.g. Britannia" />
         </div>
-        <Input label="Unit No" value={form.unit_no} onChange={set('unit_no')} />
+        <div className="col-span-2">
+          <label className="text-xs font-medium text-slate-600 mb-2 block">Blocks / Units</label>
+          {availableUnits.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {availableUnits.map(u => (
+                <label key={u.id} className="flex items-center gap-2 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm hover:bg-slate-50 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={form.unit_ids?.includes(u.id)}
+                    onChange={() => toggleUnit(u)}
+                    className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                  />
+                  <span className="text-slate-700">{u.name}</span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <input
+              type="text"
+              value={form.unit_no}
+              onChange={set('unit_no')}
+              placeholder="e.g. A-Block, B-Block"
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition-all focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 bg-white/80 w-full"
+            />
+          )}
+        </div>
         <Input label="GSTIN" value={form.gstin} onChange={set('gstin')} />
         <Input label="Phone" value={form.phone} onChange={set('phone')} />
         <Input label="Email" type="email" value={form.email}
@@ -279,7 +354,8 @@ function TenantForm({ initial = empty, properties = [], onSubmit, loading, onVie
       {/* Lease */}
       <div className="grid grid-cols-2 gap-4">
         <Input label="Lease Start" type="date" value={form.lease_start} onChange={set('lease_start')} />
-        <Input label="Lease End" type="date" value={form.lease_end} onChange={set('lease_end')} />
+        <Input label="Leased Period (Months)" type="number" value={form.leased_period} onChange={set('leased_period')} />
+        <Input label="Lock-in Period (Months)" type="number" value={form.lock_in_period} onChange={set('lock_in_period')} />
         <Input label="Monthly Rent (₹)" type="number" value={form.monthly_rent} onChange={set('monthly_rent')} />
         <Input label="Security Deposit (₹)" type="number" value={form.security_deposit} onChange={set('security_deposit')} />
       </div>
@@ -350,18 +426,44 @@ function TenantForm({ initial = empty, properties = [], onSubmit, loading, onVie
         )}
       </div>
 
-      {/* Attachment */}
       <div className="rounded-xl border border-slate-200 p-4 bg-slate-50/50">
-        <label className="text-sm font-medium text-slate-700 mb-2 block">Lease Agreement / Document</label>
-        {form.attachment_url && !form.file && (
-          <div className="mb-3 text-sm text-blue-600">
-            <button type="button" onClick={() => onViewAttachment(form.attachment_url)} className="underline hover:text-blue-800">
-              View Existing Agreement
-            </button>
+        <label className="text-sm font-medium text-slate-700 mb-2 block">Lease Agreements / Documents</label>
+
+        {/* Existing uploaded documents */}
+        {form.attachment_url && (
+          <div className="space-y-2 mb-3">
+            {form.attachment_url.split(',').map((url, i) => (
+              <div key={i} className="flex items-center justify-between bg-blue-50/50 border border-blue-100 p-2 rounded-lg">
+                <button type="button" onClick={() => onViewAttachment(url)} className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 underline">
+                  <FileText className="h-4 w-4" /> Document {i + 1}
+                </button>
+                <button type="button" onClick={() => removeExistingAttachment(url)} className="text-red-400 hover:text-red-600 p-1 rounded-md hover:bg-red-50 transition">
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
           </div>
         )}
+
+        {/* Newly selected files waiting to be uploaded */}
+        {form.files && form.files.length > 0 && (
+          <div className="space-y-2 mb-3">
+            {form.files.map((f, i) => (
+              <div key={i} className="flex items-center justify-between bg-white border border-slate-200 p-2 rounded-lg">
+                <div className="flex items-center gap-2 text-sm text-slate-700 truncate max-w-[80%]">
+                  <FileText className="h-4 w-4 text-slate-400 flex-shrink-0" /> <span className="truncate">{f.name}</span>
+                </div>
+                <button type="button" onClick={() => removeFile(i)} className="text-red-400 hover:text-red-600 p-1 rounded-md hover:bg-red-50 transition flex-shrink-0">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <input
           type="file"
+          multiple
           accept=".pdf,.png,.jpg,.jpeg"
           onChange={handleFileChange}
           className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 transition-colors"
@@ -383,34 +485,10 @@ function TenantForm({ initial = empty, properties = [], onSubmit, loading, onVie
   );
 }
 
-// ─── Lease Badge ──────────────────────────────────────────────────────────────
-const leaseStyles = {
-  'Active': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  'Expiring Soon': 'bg-orange-50  text-orange-700  ring-orange-200',
-  'Expired': 'bg-red-50     text-red-700     ring-red-200',
-  'No Lease': 'bg-slate-100  text-slate-500   ring-slate-200',
-};
-
-function LeaseBadge({ status, daysLeft }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5
-        text-xs font-medium ring-1 ring-inset ${leaseStyles[status] ?? leaseStyles['No Lease']}`}>
-        {status === 'Expiring Soon' && <AlertTriangle className="h-3 w-3" />}
-        {status}
-      </span>
-      {daysLeft !== null && daysLeft !== undefined && (
-        <span className="text-xs text-slate-400 flex items-center gap-1">
-          <Clock className="h-3 w-3" />
-          {daysLeft >= 0 ? `${daysLeft}d left` : `${Math.abs(daysLeft)}d ago`}
-        </span>
-      )}
-    </div>
-  );
-}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function Tenants() {
+  const { showToast } = useToast();
   const [search, setSearch] = useState('');
   const [propFilter, setPropFilter] = useState('');
   const [catFilter, setCatFilter] = useState('');
@@ -418,9 +496,11 @@ export default function Tenants() {
   const [selected, setSelected] = useState(null);
   const [saving, setSaving] = useState(false);
   const [applyingId, setApplyingId] = useState(null);
-  const [toast, setToast] = useState(null);
   const [pinModalFile, setPinModalFile] = useState(null);
   const [confirmConfig, setConfirmConfig] = useState(null);
+
+  const [applyEscalationId, setApplyEscalationId] = useState(null);
+  const [applyEscalationDate, setApplyEscalationDate] = useState('');
 
   const { data, loading, error, refetch } = useAsync(
     () => tenantApi.getAll({
@@ -443,68 +523,82 @@ export default function Tenants() {
   const properties = propData?.data ?? [];
   const escalation = escalData?.data ?? [];
 
-  const showToast = (msg, type = 'success') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  };
-
   const handleAdd = async (form) => {
     setSaving(true);
     try {
-      let attachment_url = null;
-      if (form.file) {
-        const uploadRes = await tenantApi.uploadFile(form.file);
-        attachment_url = uploadRes.fileUrl;
+      let newUrls = [];
+      if (form.files && form.files.length > 0) {
+        for (const file of form.files) {
+          const uploadRes = await tenantApi.uploadFile(file);
+          if (uploadRes.fileUrl) newUrls.push(uploadRes.fileUrl);
+        }
       }
 
-      const { categories, file, ...tenantData } = form;
-      if (attachment_url) tenantData.attachment_url = attachment_url;
+      const { categories, files, ...tenantData } = form;
+
+      if (newUrls.length > 0) {
+        tenantData.attachment_url = tenantData.attachment_url
+          ? [tenantData.attachment_url, ...newUrls].join(',')
+          : newUrls.join(',');
+      }
 
       const res = await tenantApi.create(tenantData);
-      
+
       if (categories && categories.length > 0) {
         const catPayload = categories.map(c => ({
           category: c,
-          amount: (c === 'Rent & CAM' && tenantData.monthly_rent) ? tenantData.monthly_rent : 0
+          amount: (c === 'Rent & CAM')
+            ? (Number(tenantData.monthly_rent || 0) + Number(tenantData.cam_amount || 0))
+            : 0
         }));
         await tenantApi.upsertCategories(res.data.id, { categories: catPayload });
       }
 
-      showToast('Tenant added');
+      showToast('Tenant added successfully', 'success');
       setModal(null);
       refetch();
       refetchEscal();
-    } catch (e) { showToast(e.message, 'error'); }
+    } catch (e) { showToast(e.response?.data?.message || e.message, 'error'); }
     finally { setSaving(false); }
   };
 
   const handleEdit = async (form) => {
     setSaving(true);
     try {
-      let attachment_url = form.attachment_url;
-      if (form.file) {
-        const uploadRes = await tenantApi.uploadFile(form.file);
-        attachment_url = uploadRes.fileUrl;
+      let newUrls = [];
+      if (form.files && form.files.length > 0) {
+        for (const file of form.files) {
+          const uploadRes = await tenantApi.uploadFile(file);
+          if (uploadRes.fileUrl) newUrls.push(uploadRes.fileUrl);
+        }
       }
 
-      const { categories, file, ...tenantData } = form;
-      tenantData.attachment_url = attachment_url;
+      const { categories, files, ...tenantData } = form;
+
+      if (newUrls.length > 0) {
+        tenantData.attachment_url = tenantData.attachment_url
+          ? [tenantData.attachment_url, ...newUrls].join(',')
+          : newUrls.join(',');
+      }
 
       await tenantApi.update(selected.id, tenantData);
 
       if (categories) {
-        const catPayload = categories.map(c => ({
-          category: c,
-          amount: (c === 'Rent & CAM' && tenantData.monthly_rent) ? tenantData.monthly_rent : 0
-        }));
+        const catPayload = categories.map(c => {
+          const existingCat = selected.categories?.find(sc => sc.category === c);
+          return {
+            category: c,
+            amount: existingCat ? Number(existingCat.amount) : 0
+          };
+        });
         await tenantApi.upsertCategories(selected.id, { categories: catPayload });
       }
 
-      showToast('Tenant updated');
+      showToast('Tenant updated successfully', 'success');
       setModal(null);
       refetch();
       refetchEscal();
-    } catch (e) { showToast(e.message, 'error'); }
+    } catch (e) { showToast(e.response?.data?.message || e.message, 'error'); }
     finally { setSaving(false); }
   };
 
@@ -517,7 +611,7 @@ export default function Tenants() {
       onConfirm: async () => {
         try {
           await tenantApi.remove(id);
-          showToast('Tenant deactivated');
+          showToast('Tenant deactivated successfully', 'success');
           refetch();
         } catch (e) { showToast(e.message, 'error'); }
       }
@@ -525,21 +619,28 @@ export default function Tenants() {
   };
 
   const handleApplyEscalation = (id, name) => {
-    setConfirmConfig({
-      title: 'Apply Escalation',
-      message: `Apply escalation for ${name}? This will update their monthly rent.`,
-      confirmText: 'Apply',
-      onConfirm: async () => {
-        setApplyingId(id);
-        try {
-          await tenantApi.applyEscalation(id);
-          showToast(`Escalation applied for ${name}`);
-          refetch();
-          refetchEscal();
-        } catch (e) { showToast(e.message, 'error'); }
-        finally { setApplyingId(null); }
-      }
-    });
+    setApplyEscalationId(id);
+    setApplyEscalationDate('');
+    setModal('apply_escalation');
+  };
+
+  const submitApplyEscalation = async (e) => {
+    e.preventDefault();
+    if (!applyEscalationDate) {
+      return showToast('Please select the next due date', 'error');
+    }
+    setApplyingId(applyEscalationId);
+    try {
+      const res = await tenantApi.applyEscalation(applyEscalationId, { next_due_date: applyEscalationDate });
+      showToast(res.message);
+      setModal(null);
+      refetchEscal();
+      refetch();
+    } catch (err) {
+      showToast(err.response?.data?.message || err.message, 'error');
+    } finally { 
+      setApplyingId(null); 
+    }
   };
 
   const expiringSoon = tenants.filter((t) => t.lease_status === 'Expiring Soon').length;
@@ -565,10 +666,11 @@ export default function Tenants() {
       render: (r) => (
         <div>
           <p className="text-sm text-slate-700">{r.property_name ?? '—'}</p>
-          {r.unit_no && <p className="text-xs text-slate-500">Unit {r.unit_no}</p>}
+          {r.unit_no && <p className="text-xs text-slate-500">Block {r.unit_no}</p>}
         </div>
       ),
     },
+
     {
       key: 'total_amount', label: 'Bill Amount', className: 'text-right',
       render: (r) => {
@@ -581,7 +683,7 @@ export default function Tenants() {
       render: (r) => (
         <div className="flex flex-wrap gap-1 max-w-[180px]">
           {r.categories?.length > 0 ? (
-            r.categories.map((c, i) => (
+            [...new Map(r.categories.map(c => [c.category.toLowerCase(), c])).values()].map((c, i) => (
               <span key={i} className="inline-flex items-center rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700 ring-1 ring-inset ring-teal-600/20" title={c.amount > 0 ? `Amount: ${formatCurrency(c.amount)}` : ''}>
                 {c.category}
               </span>
@@ -591,13 +693,8 @@ export default function Tenants() {
       ),
     },
     {
-      key: 'escalation_due_date', label: 'Due by', className: 'hidden lg:table-cell',
-      render: (r) => r.escalation_due_date ? (
-        <div>
-          <p className="text-sm text-slate-700 font-medium">{formatDate(r.escalation_due_date)}</p>
-          <EscalationBadge status={r.escalation_status} daysLeft={r.escalation_days_left} />
-        </div>
-      ) : <span className="text-sm text-slate-400">—</span>,
+      key: 'due_by', label: 'Due by', className: 'hidden sm:table-cell text-slate-600 text-sm',
+      render: (r) => r.escalation_due_date ? formatDate(r.escalation_due_date) : '—'
     },
     {
       key: 'is_active', label: 'Status', className: 'hidden sm:table-cell',
@@ -643,25 +740,7 @@ export default function Tenants() {
         loading={applyingId}
       />
 
-      {/* Lease alerts */}
-      {(expiringSoon > 0 || expired > 0) && (
-        <div className="mb-4 flex gap-3 flex-wrap">
-          {expired > 0 && (
-            <div className="flex items-center gap-2 rounded-lg border border-red-200
-              bg-red-50 px-4 py-2 text-sm text-red-700">
-              <AlertTriangle className="h-4 w-4" />
-              {expired} lease{expired > 1 ? 's' : ''} expired
-            </div>
-          )}
-          {expiringSoon > 0 && (
-            <div className="flex items-center gap-2 rounded-lg border border-orange-200
-              bg-orange-50 px-4 py-2 text-sm text-orange-700">
-              <Clock className="h-4 w-4" />
-              {expiringSoon} expiring within 30 days
-            </div>
-          )}
-        </div>
-      )}
+
 
       {/* Filters */}
       <div className="mb-4 flex flex-wrap gap-3">
@@ -689,11 +768,14 @@ export default function Tenants() {
 
       {/* Table */}
       <div className="rounded-xl border border-slate-200/60 bg-white/60 backdrop-blur-md shadow-sm overflow-hidden">
-        <div className="flex items-center gap-2 border-b border-slate-200/60 px-5 py-4 bg-white/40">
-          <Users className="h-5 w-5 text-teal-600" />
-          <span className="font-semibold text-slate-900">
-            {tenants.length} Tenant{tenants.length !== 1 ? 's' : ''}
-          </span>
+        <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4 bg-slate-50/50">
+          <Users className="h-5 w-5 text-slate-400" />
+          <span className="font-semibold text-slate-900">{tenants.length} Tenant{tenants.length !== 1 ? 's' : ''}</span>
+          {(search || propFilter || catFilter) && (
+            <span className="ml-1 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full font-medium">
+              Filtered
+            </span>
+          )}
         </div>
         <div className="overflow-x-auto">
           {error
@@ -733,7 +815,13 @@ export default function Tenants() {
               escalation_new_rent: selected.escalation_new_rent ?? '',
               escalation_applied: selected.escalation_applied || false,
               is_active: selected.is_active ?? true,
+              contact_person: selected.contact_person ?? '',
+              notice_period_days: selected.notice_period_days ?? '',
+              lock_in_period: selected.lock_in_period ?? '',
+              leased_period: selected.leased_period ?? '',
+              notes: selected.notes ?? '',
               categories: selected.categories?.map(c => c.category) || [],
+              unit_ids: selected.unit_ids || [],
               attachment_url: selected.attachment_url || null,
             }}
             onSubmit={handleEdit}
@@ -743,35 +831,56 @@ export default function Tenants() {
         )}
       </Modal>
 
+      <Modal open={modal === 'apply_escalation'} onClose={() => setModal(null)} title="Apply Rent Escalation" width="max-w-md">
+        <form onSubmit={submitApplyEscalation} className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Applying this escalation will update the tenant's current monthly rent. Please provide the <strong>Next Escalation Due Date</strong> to schedule the next cycle.
+          </p>
+          <Input 
+            label="Next Escalation Due Date *" 
+            type="date" 
+            value={applyEscalationDate} 
+            onChange={e => setApplyEscalationDate(e.target.value)} 
+            required 
+          />
+          <div className="flex justify-end gap-3 mt-6 pt-2 border-t border-slate-100">
+            <Button variant="secondary" onClick={() => setModal(null)} type="button">Cancel</Button>
+            <Button type="submit" disabled={applyingId === applyEscalationId}>
+              {applyingId === applyEscalationId ? 'Applying...' : 'Apply Escalation'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
       <Modal open={modal === 'view'} onClose={() => setModal(null)}
         title="Tenant Details" width="max-w-3xl">
         {selected && (
           <div className="space-y-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-teal-50/50 p-4 rounded-xl border border-teal-100/50">
-                <p className="text-xs text-teal-600 font-medium mb-1">Tenant Name</p>
+              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100/50">
+                <p className="text-xs text-blue-600 font-medium mb-1">Tenant Name</p>
                 <p className="font-semibold text-slate-900">{selected.name}</p>
                 {selected.gstin && <p className="text-[10px] text-slate-500 font-mono mt-1 mb-1">GST: {selected.gstin}</p>}
                 {(selected.phone || selected.email) && (
-                  <div className="mt-2 pt-2 border-t border-teal-200/50 space-y-1">
-                    {selected.phone && <p className="text-xs text-slate-700 font-medium flex items-center gap-1">📞 {selected.phone}</p>}
-                    {selected.email && <p className="text-xs text-slate-600 flex items-center gap-1">✉️ {selected.email}</p>}
+                  <div className="mt-2 pt-2 border-t border-blue-200/50 space-y-1">
+                    {selected.phone && <p className="text-xs text-slate-700 font-medium flex items-start gap-1.5"><Phone className="h-3 w-3 text-slate-400 shrink-0 mt-0.5" /> <span className="break-words">{selected.phone}</span></p>}
+                    {selected.email && <p className="text-xs text-slate-600 flex items-start gap-1.5"><Mail className="h-3 w-3 text-slate-400 shrink-0 mt-0.5" /> <span className="break-all">{selected.email}</span></p>}
                   </div>
                 )}
               </div>
-              <div className="bg-teal-50/50 p-4 rounded-xl border border-teal-100/50">
-                <p className="text-xs text-teal-600 font-medium mb-1">Property</p>
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <p className="text-xs text-slate-600 font-medium mb-1">Property</p>
                 <p className="font-medium text-slate-900">{selected.property_name || '—'}</p>
-                {selected.unit_no && <p className="text-xs text-slate-500 mt-0.5">Unit {selected.unit_no}</p>}
+                {selected.unit_no && <p className="text-xs text-slate-500 mt-0.5">Block {selected.unit_no}</p>}
               </div>
-              <div className="bg-teal-50/50 p-4 rounded-xl border border-teal-100/50">
-                <p className="text-xs text-teal-600 font-medium mb-1">Tenant Area</p>
+              <div className="bg-orange-50/50 p-4 rounded-xl border border-orange-100/50">
+                <p className="text-xs text-orange-600 font-medium mb-1">Tenant Area</p>
                 <p className="font-medium text-slate-900">
                   {selected.tenant_area ? `${Number(selected.tenant_area).toLocaleString('en-IN')} sqft` : '—'}
                 </p>
               </div>
-              <div className="bg-teal-50/50 p-4 rounded-xl border border-teal-100/50">
-                <p className="text-xs text-teal-600 font-medium mb-1">Security Deposit</p>
+              <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-100/50">
+                <p className="text-xs text-emerald-600 font-medium mb-1">Security Deposit</p>
                 <p className="font-medium text-slate-900">
                   {selected.security_deposit ? formatCurrency(selected.security_deposit) : '—'}
                 </p>
@@ -796,9 +905,9 @@ export default function Tenants() {
                   <p className="font-medium text-slate-900">{selected.cam_amount ? formatCurrency(selected.cam_amount) : '—'}</p>
                 </div>
                 <div className="p-4 bg-teal-50/30">
-                  <p className="text-xs text-teal-700 font-medium mb-1">Total Amount</p>
+                  <p className="text-xs text-teal-700 font-medium mb-1">Total Amount (incl. GST)</p>
                   <p className="font-bold text-teal-700 text-lg">
-                    {formatCurrency((parseFloat(selected.monthly_rent) || 0) + (parseFloat(selected.cam_amount) || 0))}
+                    {formatCurrency(selected.categories?.reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0) || 0)}
                   </p>
                 </div>
               </div>
@@ -810,7 +919,7 @@ export default function Tenants() {
               </div>
               <div className="p-4 bg-white flex flex-wrap gap-2">
                 {selected.categories?.length > 0 ? (
-                  selected.categories.map((c, i) => (
+                  [...new Map(selected.categories.map(c => [c.category.toLowerCase(), c])).values()].map((c, i) => (
                     <span key={i} className="inline-flex items-center rounded-md bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700 ring-1 ring-inset ring-teal-600/20">
                       {c.category}
                     </span>
@@ -828,14 +937,28 @@ export default function Tenants() {
                 </div>
                 <div className="p-4 space-y-4 bg-white">
                   <div>
-                    <p className="text-xs text-slate-500 mb-1">Lease Period</p>
+                    <p className="text-xs text-slate-500 mb-1">Date Of Agreement</p>
                     <p className="font-medium text-slate-900">
-                      {selected.lease_start ? formatDate(selected.lease_start) : '—'} <span className="text-slate-400 mx-2">to</span> {selected.lease_end ? formatDate(selected.lease_end) : '—'}
+                      {selected.lease_start ? formatDate(selected.lease_start) : '—'}
                     </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-slate-500 mb-1">Leased Period</p>
+                      <p className="font-medium text-slate-900">{selected.leased_period ? `${selected.leased_period} Months` : '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500 mb-1">Lock-in Period</p>
+                      <p className="font-medium text-slate-900">{selected.lock_in_period ? `${selected.lock_in_period} Months` : '—'}</p>
+                    </div>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 mb-1.5">Lease Status</p>
-                    <LeaseBadge status={selected.lease_status} daysLeft={selected.days_to_expiry} />
+                    <StatusBadge
+                      status={selected.lease_status}
+                      icon={getLeaseIcon(selected.lease_status)}
+                      sublabel={selected.days_to_expiry !== null && selected.days_to_expiry !== undefined ? (selected.days_to_expiry >= 0 ? `${selected.days_to_expiry}d left` : `${Math.abs(selected.days_to_expiry)}d ago`) : null}
+                    />
                   </div>
                 </div>
               </div>
@@ -855,16 +978,20 @@ export default function Tenants() {
                       <p className="font-semibold text-slate-900">{selected.escalation_due_date ? formatDate(selected.escalation_due_date) : '—'}</p>
                     </div>
                   </div>
-                  
+
                   {selected.escalation_due_date && (
                     <div className="pt-3 border-t border-slate-100 flex justify-between items-end">
                       <div>
-                         <p className="text-xs text-slate-500 mb-1.5">Status</p>
-                         <EscalationBadge status={selected.escalation_status} daysLeft={selected.escalation_days_left} />
+                        <p className="text-xs text-slate-500 mb-1.5">Status</p>
+                        <StatusBadge
+                          status={selected.escalation_status}
+                          icon={getEscalationIcon(selected.escalation_status)}
+                          sublabel={selected.escalation_days_left !== null && selected.escalation_days_left !== undefined && selected.escalation_status !== 'Applied' ? (selected.escalation_days_left >= 0 ? `${selected.escalation_days_left}d left` : `${Math.abs(selected.escalation_days_left)}d overdue`) : null}
+                        />
                       </div>
                       <div className="text-right">
-                         <p className="text-xs text-teal-600 mb-1">New Rent</p>
-                         <p className="font-bold text-teal-700">{selected.escalation_new_rent ? formatCurrency(selected.escalation_new_rent) : '—'}</p>
+                        <p className="text-xs text-teal-600 mb-1">New Rent</p>
+                        <p className="font-bold text-teal-700">{selected.escalation_new_rent ? formatCurrency(selected.escalation_new_rent) : '—'}</p>
                       </div>
                     </div>
                   )}
@@ -877,24 +1004,20 @@ export default function Tenants() {
                 <div className="bg-slate-50 px-4 py-2 border-b border-slate-200">
                   <h3 className="text-sm font-semibold text-slate-700">Documents</h3>
                 </div>
-                <div className="p-4 bg-white">
-                  <button type="button" onClick={() => setPinModalFile(selected.attachment_url)} className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 underline">
-                    View Lease Agreement
-                  </button>
+                <div className="p-4 bg-white space-y-2">
+                  {selected.attachment_url.split(',').map((url, i) => (
+                    <div key={i}>
+                      <button type="button" onClick={() => setPinModalFile(url)} className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 underline">
+                        <FileText className="h-4 w-4" /> View Document {i + 1}
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
           </div>
         )}
       </Modal>
-
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 rounded-xl px-4 py-3
-          text-sm font-medium shadow-lg
-          ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
-          {toast.msg}
-        </div>
-      )}
 
       {pinModalFile && (
         <PinModal filename={pinModalFile} onClose={() => setPinModalFile(null)} />

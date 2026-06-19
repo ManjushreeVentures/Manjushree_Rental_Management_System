@@ -12,16 +12,18 @@ import { useAsync } from '../hooks/useAsync';
 import { reportApi }   from '../api/report.api';
 import { invoiceApi }  from '../api/invoice.api';
 import { tenantApi }   from '../api/tenant.api';
+import { useToast } from '../contexts/ToastContext';
+import { agingConfig } from '../utils/constants';
+import StatusBadge  from '../components/ui/StatusBadge';
 import { formatCurrency, formatDate, formatBillingMonth } from '../utils/format';
 
 const AGING_BUCKETS = ['Current', '1-30 Days', '31-60 Days', '61-90 Days', '90+ Days'];
 
-const agingCellColor = {
-  'Current':    'text-emerald-700',
-  '1-30 Days':  'text-yellow-700',
-  '31-60 Days': 'text-orange-700',
-  '61-90 Days': 'text-red-700',
-  '90+ Days':   'text-red-900 font-bold',
+const getAgingColor = (bucket) => {
+  if (!bucket) return '';
+  const normalized = bucket.replace('-', '–');
+  const conf = agingConfig.find(c => c.label === normalized);
+  return conf ? conf.text : '';
 };
 
 // ─── Report card nav ──────────────────────────────────────────────────────────
@@ -70,11 +72,25 @@ const REPORTS = [
 
 // ─── Outstanding Report ───────────────────────────────────────────────────────
 function OutstandingReport() {
+  const { showToast } = useToast();
+  const [isExporting, setIsExporting] = useState(false);
   const [filters, setFilters] = useState({ property_name: '', aging_bucket: '' });
   const { data, loading, error } = useAsync(
     () => reportApi.getOutstanding(filters), [filters]
   );
   const rows = data?.data ?? [];
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      await reportApi.downloadOutstanding(filters);
+      showToast('Report exported successfully', 'success');
+    } catch (err) {
+      showToast('Failed to export report', 'error');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const columns = [
     { key: 'Tenant Name',   label: 'Tenant',
@@ -114,7 +130,7 @@ function OutstandingReport() {
       )},
     { key: 'Aging Bucket',  label: 'Aging',
       render: (r) => (
-        <span className={`text-xs font-medium ${agingCellColor[r['Aging Bucket']] ?? ''}`}>
+        <span className={`text-xs font-medium ${getAgingColor(r['Aging Bucket'])}`}>
           {r['Aging Bucket']}
         </span>
       )},
@@ -131,8 +147,7 @@ function OutstandingReport() {
           onChange={(k, v) => setFilters((f) => ({ ...f, [k]: v }))}
           onReset={() => setFilters({ property_name: '', aging_bucket: '' })}
         />
-        <Button variant="secondary"
-          onClick={() => reportApi.downloadOutstanding(filters)}>
+        <Button variant="secondary" onClick={handleExport} loading={isExporting}>
           <Download className="h-4 w-4" /> Export Excel
         </Button>
       </div>
@@ -156,8 +171,22 @@ function OutstandingReport() {
 
 // ─── Collection Summary ───────────────────────────────────────────────────────
 function CollectionSummaryReport() {
+  const { showToast } = useToast();
+  const [isExporting, setIsExporting] = useState(false);
   const [tab, setTab] = useState('month');
   const { data, loading } = useAsync(() => reportApi.getCollectionSummary(), []);
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      await reportApi.downloadCollectionSummary({});
+      showToast('Report exported successfully', 'success');
+    } catch (err) {
+      showToast('Failed to export report', 'error');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const byMonth    = data?.data?.byMonth    ?? [];
   const byProperty = data?.data?.byProperty ?? [];
@@ -253,8 +282,7 @@ function CollectionSummaryReport() {
             </button>
           ))}
         </div>
-        <Button variant="secondary"
-          onClick={() => reportApi.downloadCollectionSummary({})}>
+        <Button variant="secondary" onClick={handleExport} loading={isExporting}>
           <Download className="h-4 w-4" /> Export Excel
         </Button>
       </div>
@@ -267,8 +295,22 @@ function CollectionSummaryReport() {
 
 // ─── Aging Detail Report ──────────────────────────────────────────────────────
 function AgingDetailReport() {
+  const { showToast } = useToast();
+  const [isExporting, setIsExporting] = useState(false);
   const [tab, setTab] = useState('summary');
   const { data, loading } = useAsync(() => reportApi.getAgingDetail(), []);
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      await reportApi.downloadAgingDetail({});
+      showToast('Report exported successfully', 'success');
+    } catch (err) {
+      showToast('Failed to export report', 'error');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const summary = data?.data?.summary ?? [];
   const detail  = data?.data?.detail  ?? [];
@@ -322,7 +364,7 @@ function AgingDetailReport() {
       )},
     { key: 'Aging Bucket',  label: 'Bucket',
       render: (r) => (
-        <span className={`text-xs font-medium ${agingCellColor[r['Aging Bucket']] ?? ''}`}>
+        <span className={`text-xs font-medium ${getAgingColor(r['Aging Bucket'])}`}>
           {r['Aging Bucket']}
         </span>
       )},
@@ -343,8 +385,7 @@ function AgingDetailReport() {
               </button>
             ))}
         </div>
-        <Button variant="secondary"
-          onClick={() => reportApi.downloadAgingDetail({})}>
+        <Button variant="secondary" onClick={handleExport} loading={isExporting}>
           <Download className="h-4 w-4" /> Export Excel
         </Button>
       </div>
@@ -361,16 +402,30 @@ function AgingDetailReport() {
 
 // ─── Tenant Ledger ────────────────────────────────────────────────────────────
 function TenantLedgerReport() {
-  const [tenantName, setTenantName] = useState('');
+  const { showToast } = useToast();
+  const [isExporting, setIsExporting] = useState(false);
+  const [tenantId, setTenantId] = useState('');
   const [submitted,  setSubmitted]  = useState('');
 
-  const { data: tenantsData } = useAsync(() => tenantApi.getAll({}), []);
+  const { data: tenantsData } = useAsync(() => tenantApi.getAll({ is_active: true }), []);
   const tenants = tenantsData?.data ?? [];
 
   const { data, loading, error } = useAsync(
-    () => submitted ? reportApi.getTenantLedger({ tenant_name: submitted }) : Promise.resolve(null),
+    () => submitted ? reportApi.getTenantLedger({ tenant_id: submitted }) : Promise.resolve(null),
     [submitted]
   );
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      await reportApi.downloadTenantLedger({ tenant_id: submitted });
+      showToast('Report exported successfully', 'success');
+    } catch (err) {
+      showToast('Failed to export report', 'error');
+    } finally {
+      setIsExporting(false);
+    }
+  };
   const rows = data?.data ?? [];
 
   const columns = [
@@ -410,26 +465,25 @@ function TenantLedgerReport() {
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-slate-600">Select Tenant</label>
           <select
-            value={tenantName}
-            onChange={(e) => setTenantName(e.target.value)}
+            value={tenantId}
+            onChange={(e) => setTenantId(e.target.value)}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm
               outline-none focus:ring-2 focus:ring-blue-500 bg-white w-72"
           >
             <option value="">Choose a tenant…</option>
             {tenants.map((t) => (
-              <option key={t.id} value={t.name}>{t.name}</option>
+              <option key={t.id} value={t.id}>{t.name} — {t.property_name}</option>
             ))}
           </select>
         </div>
         <Button
-          onClick={() => setSubmitted(tenantName)}
-          disabled={!tenantName}
+          onClick={() => setSubmitted(tenantId)}
+          disabled={!tenantId || loading}
         >
           Load Ledger
         </Button>
         {submitted && (
-          <Button variant="secondary"
-            onClick={() => reportApi.downloadTenantLedger({ tenant_name: submitted })}>
+          <Button variant="secondary" onClick={handleExport} loading={isExporting}>
             <Download className="h-4 w-4" /> Export Excel
           </Button>
         )}
@@ -469,8 +523,22 @@ function TenantLedgerReport() {
 
 // ─── Rent Roll ────────────────────────────────────────────────────────────────
 function RentRollReport() {
+  const { showToast } = useToast();
+  const [isExporting, setIsExporting] = useState(false);
   const { data, loading, error } = useAsync(() => reportApi.getRentRoll(), []);
   const rows = data?.data ?? [];
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      await reportApi.downloadRentRoll({});
+      showToast('Report exported successfully', 'success');
+    } catch (err) {
+      showToast('Failed to export report', 'error');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const totalMonthly = rows.reduce((s, r) => s + (parseFloat(r['Monthly Rent']) || 0), 0);
   const totalAnnual  = rows.reduce((s, r) => s + (parseFloat(r['Annual Rent'])  || 0), 0);
@@ -517,20 +585,8 @@ function RentRollReport() {
         );
       }},
     { key: 'Lease Status', label: 'Status',
-      render: (r) => {
-        const s = r['Lease Status'];
-        const cls =
-          s === 'Active'         ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' :
-          s === 'Expiring Soon'  ? 'bg-orange-50  text-orange-700  ring-orange-200'  :
-          s === 'Expired'        ? 'bg-red-50     text-red-700     ring-red-200'     :
-                                   'bg-slate-100  text-slate-500   ring-slate-200';
-        return (
-          <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs
-            font-medium ring-1 ring-inset ${cls}`}>
-            {s}
-          </span>
-        );
-      }},
+      render: (r) => <StatusBadge status={r['Lease Status']} />
+    },
   ];
 
   return (
@@ -552,8 +608,7 @@ function RentRollReport() {
             </div>
           </div>
         )}
-        <Button variant="secondary"
-          onClick={() => reportApi.downloadRentRoll({})}>
+        <Button variant="secondary" onClick={handleExport} loading={isExporting}>
           <Download className="h-4 w-4" /> Export Excel
         </Button>
       </div>
@@ -589,23 +644,23 @@ export default function Reports() {
             <button
               key={r.id}
               onClick={() => setActive(r.id)}
-              className={`rounded-xl border p-4 text-left transition
+              className={`group relative overflow-hidden rounded-xl border p-3 text-left transition-all active:scale-95
                 ${isActive
-                  ? 'border-blue-300 bg-blue-50 shadow-sm ring-1 ring-blue-200'
-                  : 'border-slate-200 bg-white hover:border-blue-200 hover:shadow-sm'}`}
+                  ? 'border-teal-300 bg-gradient-to-br from-teal-50/80 to-white shadow-md ring-1 ring-teal-200'
+                  : 'border-slate-200 bg-white hover:border-teal-200 hover:shadow-md hover:bg-slate-50'}`}
             >
-              <div className={`h-9 w-9 rounded-lg ${r.bg}
-                flex items-center justify-center mb-3`}>
-                <Icon className={`h-5 w-5 ${r.color}`} />
+              {isActive && <div className="absolute top-0 right-0 w-20 h-20 bg-teal-400/10 rounded-full blur-xl -mr-10 -mt-10" />}
+              <div className="flex items-start gap-2.5 relative z-10">
+                <div className={`shrink-0 h-8 w-8 rounded-lg ${r.bg} flex items-center justify-center shadow-sm border border-white/60 group-hover:scale-110 transition-transform`}>
+                  <Icon className={`h-4 w-4 ${r.color}`} />
+                </div>
+                <div>
+                  <p className={`text-[13px] font-bold leading-tight ${isActive ? 'text-teal-900' : 'text-slate-800 group-hover:text-teal-800'}`}>
+                    {r.label}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-snug line-clamp-2">{r.desc}</p>
+                </div>
               </div>
-              <p className={`text-sm font-semibold
-                ${isActive ? 'text-blue-900' : 'text-slate-800'}`}>
-                {r.label}
-              </p>
-              <p className="text-xs text-slate-400 mt-0.5">{r.desc}</p>
-              {isActive && (
-                <ChevronRight className="h-4 w-4 text-blue-500 mt-2" />
-              )}
             </button>
           );
         })}

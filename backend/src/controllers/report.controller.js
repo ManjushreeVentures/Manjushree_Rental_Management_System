@@ -1,24 +1,72 @@
 import pool from '../config/db.js';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 function toFloat(v) { return parseFloat(v) || 0; }
 
-function buildXlsx(sheets) {
-  // sheets: [{ name, rows }]
-  const wb = XLSX.utils.book_new();
-  for (const { name, rows } of sheets) {
-    const ws = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, name);
-  }
-  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-}
+async function sendXlsx(res, filename, sheets) {
+  const wb = new ExcelJS.Workbook();
 
-function sendXlsx(res, filename, sheets) {
-  const buf = buildXlsx(sheets);
+  for (const { name, rows } of sheets) {
+    const ws = wb.addWorksheet(name);
+
+    if (rows && rows.length > 0) {
+      // Create headers and calc widths
+      const headers = Object.keys(rows[0]);
+      ws.columns = headers.map(header => {
+        let maxLen = header.length;
+        rows.forEach(row => {
+          const val = row[header];
+          if (val !== null && val !== undefined) {
+            const strVal = String(val);
+            if (strVal.length > maxLen) {
+              maxLen = strVal.length;
+            }
+          }
+        });
+        return {
+          header: header,
+          key: header,
+          width: Math.min(maxLen + 2, 50)
+        };
+      });
+
+      // Add data
+      ws.addRows(rows);
+
+      // Style header row
+      const headerRow = ws.getRow(1);
+      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF1E3A8A' } // Tailwind blue-900
+      };
+      headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+
+      // Style all cells (borders and padding)
+      ws.eachRow((row, rowNumber) => {
+        row.eachCell((cell, colNumber) => {
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+          };
+          if (rowNumber > 1) {
+            // align numbers right, text left if desired, or just generic
+            cell.alignment = { vertical: 'middle' };
+          }
+        });
+      });
+    } else {
+      ws.addRow(['No data available']);
+    }
+  }
+
+  const buf = await wb.xlsx.writeBuffer();
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-  res.setHeader('Content-Type',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.send(buf);
 }
 
@@ -26,10 +74,10 @@ function sendXlsx(res, filename, sheets) {
 export async function outstandingReport(req, res) {
   const { property_name, aging_bucket, format = 'json' } = req.query;
   const params = [];
-  let where    = `WHERE i.outstanding_balance > 0`;
+  let where = `WHERE i.outstanding_balance > 0`;
 
   if (property_name) { params.push(property_name); where += ` AND i.property_name = $${params.length}`; }
-  if (aging_bucket)  { params.push(aging_bucket);  where += ` AND compute_aging_bucket(i.due_date, i.amount_collected, i.bill_amount) = $${params.length}`; }
+  if (aging_bucket) { params.push(aging_bucket); where += ` AND compute_aging_bucket(i.due_date, i.amount_collected, i.bill_amount) = $${params.length}`; }
 
   const { rows } = await pool.query(
     `SELECT
@@ -56,7 +104,7 @@ export async function outstandingReport(req, res) {
   );
 
   if (format === 'xlsx') {
-    return sendXlsx(res, 'Outstanding_Report.xlsx', [{ name: 'Outstanding', rows }]);
+    return await sendXlsx(res, 'Outstanding_Report.xlsx', [{ name: 'Outstanding', rows }]);
   }
   res.json({ success: true, data: rows, total: rows.length });
 }
@@ -112,19 +160,19 @@ export async function collectionSummary(req, res) {
   ]);
 
   if (format === 'xlsx') {
-    return sendXlsx(res, 'Collection_Summary.xlsx', [
-      { name: 'By Month',    rows: byMonthRes.rows    },
+    return await sendXlsx(res, 'Collection_Summary.xlsx', [
+      { name: 'By Month', rows: byMonthRes.rows },
       { name: 'By Property', rows: byPropertyRes.rows },
-      { name: 'By Mode',     rows: byModeRes.rows     },
+      { name: 'By Mode', rows: byModeRes.rows },
     ]);
   }
 
   res.json({
     success: true,
     data: {
-      byMonth:    byMonthRes.rows,
+      byMonth: byMonthRes.rows,
       byProperty: byPropertyRes.rows,
-      byMode:     byModeRes.rows,
+      byMode: byModeRes.rows,
     },
   });
 }
@@ -174,9 +222,9 @@ export async function agingDetail(req, res) {
   ]);
 
   if (format === 'xlsx') {
-    return sendXlsx(res, 'Aging_Detail.xlsx', [
+    return await sendXlsx(res, 'Aging_Detail.xlsx', [
       { name: 'Summary by Property', rows: summaryRes.rows },
-      { name: 'Detail',              rows: detailRes.rows  },
+      { name: 'Detail', rows: detailRes.rows },
     ]);
   }
 
@@ -184,16 +232,16 @@ export async function agingDetail(req, res) {
     success: true,
     data: {
       summary: summaryRes.rows,
-      detail:  detailRes.rows,
+      detail: detailRes.rows,
     },
   });
 }
 
 // ─── GET /reports/tenant-ledger ────────────────────────────────────────────────
 export async function tenantLedger(req, res) {
-  const { tenant_name, format = 'json' } = req.query;
-  if (!tenant_name)
-    return res.status(400).json({ success: false, message: 'tenant_name is required' });
+  const { tenant_id, format = 'json' } = req.query;
+  if (!tenant_id)
+    return res.status(400).json({ success: false, message: 'tenant_id is required' });
 
   const [invoicesRes, receiptsRes] = await Promise.all([
     pool.query(
@@ -207,9 +255,9 @@ export async function tenantLedger(req, res) {
          i.status          AS "Status",
          i.aging_bucket    AS "Aging"
        FROM invoices i
-       WHERE i.tenant_name = $1
+       WHERE i.tenant_id = $1
        ORDER BY i.bill_date DESC`,
-      [tenant_name]
+      [tenant_id]
     ),
     pool.query(
       `SELECT
@@ -223,9 +271,9 @@ export async function tenantLedger(req, res) {
          ''                AS "Aging"
        FROM receipts r
        JOIN invoices i ON i.id = r.invoice_id
-       WHERE i.tenant_name = $1
+       WHERE i.tenant_id = $1
        ORDER BY r.payment_date DESC`,
-      [tenant_name]
+      [tenant_id]
     ),
   ]);
 
@@ -233,7 +281,7 @@ export async function tenantLedger(req, res) {
     .sort((a, b) => new Date(b.Date) - new Date(a.Date));
 
   if (format === 'xlsx') {
-    return sendXlsx(res, `Ledger_${tenant_name.replace(/\s+/g, '_')}.xlsx`, [
+    return await sendXlsx(res, `Ledger_${tenant_id}.xlsx`, [
       { name: 'Ledger', rows },
     ]);
   }
@@ -269,7 +317,7 @@ export async function rentRoll(req, res) {
   );
 
   if (format === 'xlsx') {
-    return sendXlsx(res, 'Rent_Roll.xlsx', [{ name: 'Rent Roll', rows }]);
+    return await sendXlsx(res, 'Rent_Roll.xlsx', [{ name: 'Rent Roll', rows }]);
   }
   res.json({ success: true, data: rows });
 }

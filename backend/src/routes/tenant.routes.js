@@ -23,4 +23,16 @@ router.get('/:id/categories', getTenantCategories);
 router.post('/:id/categories', upsertTenantCategories);
 router.post('/:id/apply-escalation', applyEscalation);
 
+import pool from '../config/db.js';
+router.get('/test/db', async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT t.name as tenant_name, tc.category, tc.amount, tc.is_active 
+    FROM tenants t 
+    LEFT JOIN tenant_categories tc ON tc.tenant_id = t.id 
+    WHERE tc.is_active = true
+    ORDER BY t.name
+  `);
+  res.json(rows);
+});
+
 export default router;

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Lock, Eye, EyeOff } from 'lucide-react';
 import { uploadApi } from '../api/upload.api';
+import InlineAlert from './ui/InlineAlert';
 
 export default function PinModal({ filename, onClose }) {
   const [pin, setPin] = useState('');
@@ -81,9 +82,7 @@ export default function PinModal({ filename, onClose }) {
           </div>
 
           {error && (
-            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600 border border-red-100 text-center">
-              {error}
-            </div>
+          <InlineAlert variant="error">{error}</InlineAlert>
           )}
 
           <button

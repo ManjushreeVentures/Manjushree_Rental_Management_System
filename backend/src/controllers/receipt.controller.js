@@ -5,14 +5,14 @@ import { logAudit } from '../services/audit.service.js';
 export async function getAllReceipts(req, res) {
   const {
     search, payment_mode, billing_month,
-    property_name, tenant_name, category,
+    property_name, tenant_id, category,
     date_from, date_to,
     page = 1, limit = 50,
   } = req.query;
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const params = [];
-  let where    = 'WHERE 1=1';
+  let where = 'WHERE 1=1';
 
   const add = (clause, value) => {
     params.push(value);
@@ -27,13 +27,13 @@ export async function getAllReceipts(req, res) {
       r.reference_no   ILIKE $${params.length}
     )`;
   }
-  if (payment_mode)  add('r.payment_mode = ?',       payment_mode);
-  if (billing_month) add('i.billing_month = ?',       billing_month);
-  if (property_name) add('i.property_name = ?',       property_name);
-  if (tenant_name)   add('i.tenant_name = ?',         tenant_name);
-  if (category)      add('i.category = ?',            category);
-  if (date_from)     add('r.payment_date >= ?::date', date_from);
-  if (date_to)       add('r.payment_date <= ?::date', date_to);
+  if (payment_mode) add('r.payment_mode = ?', payment_mode);
+  if (billing_month) add('i.billing_month = ?', billing_month);
+  if (property_name) add('i.property_name = ?', property_name);
+  if (tenant_id) add('i.tenant_id = ?', tenant_id);
+  if (category) add('i.category = ?', category);
+  if (date_from) add('r.payment_date >= ?::date', date_from);
+  if (date_to) add('r.payment_date <= ?::date', date_to);
 
   const dataQuery = `
     SELECT
@@ -60,8 +60,8 @@ export async function getAllReceipts(req, res) {
   `;
 
   const [dataRes, countRes] = await Promise.all([
-    pool.query(dataQuery,  [...params, parseInt(limit), offset]),
-    pool.query(countQuery,  params),
+    pool.query(dataQuery, [...params, parseInt(limit), offset]),
+    pool.query(countQuery, params),
   ]);
 
   res.json({
@@ -69,7 +69,7 @@ export async function getAllReceipts(req, res) {
     data: dataRes.rows,
     meta: {
       total: parseInt(countRes.rows[0].count),
-      page:  parseInt(page),
+      page: parseInt(page),
       limit: parseInt(limit),
       pages: Math.ceil(countRes.rows[0].count / parseInt(limit)),
     },
@@ -138,11 +138,11 @@ export async function createReceipt(req, res) {
     );
 
     // recalculate invoice
-    const newCollected    = parseFloat(inv.amount_collected)    + parseFloat(amount);
-    const newOutstanding  = parseFloat(inv.bill_amount)         - newCollected;
-    const newStatus       = newOutstanding <= 0 ? 'Paid'
-                          : newCollected   >  0 ? 'Partial'
-                          :                       'Pending';
+    const newCollected = parseFloat(inv.amount_collected) + parseFloat(amount);
+    const newOutstanding = parseFloat(inv.bill_amount) - newCollected;
+    const newStatus = newOutstanding <= 0 ? 'Paid'
+      : newCollected > 0 ? 'Partial'
+        : 'Pending';
 
     // recalculate aging bucket based on new outstanding and overdue days
     const updInv = await client.query(
@@ -161,7 +161,7 @@ export async function createReceipt(req, res) {
     res.status(201).json({
       success: true,
       data: {
-        receipt:        recRes.rows[0],
+        receipt: recRes.rows[0],
         updatedInvoice: updInv.rows[0],
       },
     });
@@ -198,12 +198,12 @@ export async function deleteReceipt(req, res) {
       `SELECT bill_amount, amount_collected FROM invoices WHERE id = $1 FOR UPDATE`,
       [receipt.invoice_id]
     );
-    const inv            = invRes.rows[0];
-    const newCollected   = Math.max(0, parseFloat(inv.amount_collected) - parseFloat(receipt.amount));
+    const inv = invRes.rows[0];
+    const newCollected = Math.max(0, parseFloat(inv.amount_collected) - parseFloat(receipt.amount));
     const newOutstanding = parseFloat(inv.bill_amount) - newCollected;
-    const newStatus      = newOutstanding >= parseFloat(inv.bill_amount) ? 'Pending'
-                         : newCollected   > 0                            ? 'Partial'
-                         :                                                 'Paid';
+    const newStatus = newOutstanding >= parseFloat(inv.bill_amount) ? 'Pending'
+      : newCollected > 0 ? 'Partial'
+        : 'Paid';
 
     await client.query(
       `UPDATE invoices
@@ -230,8 +230,8 @@ export async function deleteReceipt(req, res) {
 export async function getReceiptStats(req, res) {
   const { date_from, date_to, billing_month } = req.query;
   const params = [];
-  let where    = 'WHERE 1=1';
-  let join     = '';
+  let where = 'WHERE 1=1';
+  let join = '';
 
   if (billing_month) {
     join = 'JOIN invoices i ON i.id = r.invoice_id';
@@ -240,7 +240,7 @@ export async function getReceiptStats(req, res) {
   }
 
   if (date_from) { params.push(date_from); where += ` AND r.payment_date >= $${params.length}::date`; }
-  if (date_to)   { params.push(date_to);   where += ` AND r.payment_date <= $${params.length}::date`; }
+  if (date_to) { params.push(date_to); where += ` AND r.payment_date <= $${params.length}::date`; }
 
   const { rows } = await pool.query(
     `SELECT

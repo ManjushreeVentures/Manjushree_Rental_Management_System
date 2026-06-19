@@ -8,6 +8,7 @@ import {
   updateInvoice,
   generateInvoices,
   bulkGenerateInvoices,
+  previewOverdueReminder,
   sendOverdueReminders,
   deleteInvoice
 } from '../controllers/invoice.controller.js';
@@ -25,6 +26,7 @@ router.put('/:id', validate(invoiceSchema.partial()), updateInvoice);
 router.delete('/:id', deleteInvoice);
 router.post('/generate', generateInvoices);
 router.post('/bulk-generate', bulkGenerateInvoices);
+router.post('/preview-reminder', previewOverdueReminder);
 router.post('/send-reminders', sendOverdueReminders);
 
 export default router;

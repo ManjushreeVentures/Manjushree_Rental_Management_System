@@ -4,7 +4,7 @@ export async function getAuditLogs(req, res) {
   try {
     const { page = 1, limit = 50, entity, action } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
-    
+
     const params = [];
     let where = 'WHERE 1=1';
 
