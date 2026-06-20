@@ -22,6 +22,11 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (res) => res.data,
   (err) => {
+    if (err.response?.status === 401 || err.response?.status === 403) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/';
+    }
     const msg = err.response?.data?.message ?? 'Something went wrong';
     return Promise.reject(new Error(msg));
   }

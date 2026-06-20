@@ -19,7 +19,8 @@ import { invoiceApi }  from '../api/invoice.api';
 import { formatCurrency, formatDate, formatBillingMonth, getCurrentBillingMonth } from '../utils/format';
 import { useToast } from '../contexts/ToastContext';
 import KPICard from '../components/ui/KPICard';
-import { useInvoiceSearch } from '../hooks/useInvoiceSearch';
+import { useTenantSearch } from '../hooks/useTenantSearch';
+import { receivableApi } from '../api/receivable.api';
 import PinModal from '../components/PinModal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 
@@ -65,8 +66,6 @@ function ReceiptKPIs({ stats }) {
 
 // ─── Record Payment Form ──────────────────────────────────────────────────────
 const emptyForm = {
-  invoice_id:     '',
-  amount:         '',
   payment_date:   new Date().toISOString().split('T')[0],
   payment_mode:   'NEFT',
   reference_no:   '',
@@ -75,11 +74,16 @@ const emptyForm = {
 };
 
 function RecordPaymentForm({ onSubmit, loading, showToast }) {
-  const [form,   setForm]   = useState(emptyForm);
+  const [form, setForm] = useState(emptyForm);
   const [errors, setErrors] = useState({});
-  const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [selectedTenant, setSelectedTenant] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const { search: invoiceSearch, options: invoiceOptions, searching, searchInvoices, clearSearch } = useInvoiceSearch();
+  
+  const [invoices, setInvoices] = useState([]);
+  const [allocations, setAllocations] = useState({}); // { invoice_id: { checked, amount, outstanding } }
+  const [totalPayment, setTotalPayment] = useState('');
+
+  const { search: tenantSearch, options: tenantOptions, searching, searchTenants, clearSearch } = useTenantSearch();
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -97,30 +101,85 @@ function RecordPaymentForm({ onSubmit, loading, showToast }) {
     }
   };
 
-
-  const selectInvoice = (inv) => {
-    setSelectedInvoice(inv);
-    setForm((f) => ({
-      ...f,
-      invoice_id: inv.id,
-      amount:     inv.outstanding_balance,
-    }));
-    searchInvoices(`${inv.tenant_name} — ${formatBillingMonth(inv.billing_month)} (${formatCurrency(inv.outstanding_balance)})`);
+  const selectTenant = async (tenant) => {
+    setSelectedTenant(tenant);
+    searchTenants(tenant.name);
+    try {
+      const res = await receivableApi.getTenantOutstanding(tenant.id);
+      const outInvs = (res.data?.invoices || []).filter(i => i.outstanding_balance > 0);
+      setInvoices(outInvs);
+      const allocMap = {};
+      outInvs.forEach(i => {
+        allocMap[i.id] = { checked: true, amount: '', outstanding: parseFloat(i.outstanding_balance) };
+      });
+      setAllocations(allocMap);
+    } catch (err) {
+      showToast('Failed to load outstanding invoices', 'error');
+    }
   };
 
-  const clearInvoiceSelection = () => {
-    setSelectedInvoice(null);
-    setForm((f) => ({ ...f, invoice_id: '', amount: '' }));
+  const clearTenantSelection = () => {
+    setSelectedTenant(null);
+    setInvoices([]);
+    setAllocations({});
+    setTotalPayment('');
     clearSearch();
+  };
+
+  const handleAutoAllocate = () => {
+    const total = parseFloat(totalPayment);
+    if (!total || total <= 0) return;
+    let remaining = total;
+    
+    const newAlloc = { ...allocations };
+    const checkedInvs = invoices.filter(i => newAlloc[i.id].checked).sort((a,b) => new Date(a.due_date) - new Date(b.due_date));
+    
+    Object.keys(newAlloc).forEach(k => { newAlloc[k].amount = ''; });
+
+    for (const inv of checkedInvs) {
+      if (remaining <= 0) break;
+      const outst = newAlloc[inv.id].outstanding;
+      const allocAmount = Math.min(remaining, outst);
+      newAlloc[inv.id].amount = allocAmount.toFixed(2);
+      remaining -= allocAmount;
+    }
+    
+    if (remaining > 0) {
+      showToast(`₹${formatCurrency(remaining)} remaining unallocated.`, 'warning');
+    }
+    setAllocations(newAlloc);
+  };
+
+  const toggleInvoice = (id) => {
+    setAllocations(prev => ({
+      ...prev,
+      [id]: { ...prev[id], checked: !prev[id].checked, amount: prev[id].checked ? '' : prev[id].amount }
+    }));
+  };
+
+  const setAllocAmount = (id, val) => {
+    setAllocations(prev => ({
+      ...prev,
+      [id]: { ...prev[id], amount: val, checked: true }
+    }));
   };
 
   const validate = () => {
     const errs = {};
-    if (!form.invoice_id)   errs.invoice_id   = 'Select an invoice';
-    if (!form.amount || parseFloat(form.amount) <= 0)
-                            errs.amount       = 'Enter a valid amount';
-    if (selectedInvoice && parseFloat(form.amount) > parseFloat(selectedInvoice.outstanding_balance))
-                            errs.amount       = `Max: ${formatCurrency(selectedInvoice.outstanding_balance)}`;
+    if (!selectedTenant) errs.tenant_id = 'Select a tenant';
+    
+    const validAllocs = Object.entries(allocations).filter(([_, v]) => v.checked && parseFloat(v.amount) > 0);
+    if (validAllocs.length === 0 && selectedTenant) {
+      errs.allocations = 'Allocate amount to at least one invoice';
+    } else {
+      for (const [id, v] of validAllocs) {
+        if (parseFloat(v.amount) > v.outstanding) {
+          errs.allocations = 'Allocation exceeds outstanding balance on one or more invoices';
+          break;
+        }
+      }
+    }
+    
     if (!form.payment_date) errs.payment_date = 'Required';
     setErrors(errs);
     return !Object.keys(errs).length;
@@ -128,48 +187,50 @@ function RecordPaymentForm({ onSubmit, loading, showToast }) {
 
   const handleSubmit = () => {
     if (!validate()) return;
-    onSubmit({ ...form, amount: parseFloat(form.amount) });
+    const finalAllocations = Object.entries(allocations)
+      .filter(([_, v]) => v.checked && parseFloat(v.amount) > 0)
+      .map(([id, v]) => ({ invoice_id: id, amount: parseFloat(v.amount) }));
+      
+    onSubmit({ ...form, allocations: finalAllocations });
   };
+
+  const totalAllocated = Object.values(allocations)
+    .filter(v => v.checked && parseFloat(v.amount) > 0)
+    .reduce((sum, v) => sum + parseFloat(v.amount), 0);
 
   return (
     <div className="space-y-4">
-      {/* invoice search */}
+      {/* tenant search */}
       <div className="flex flex-col gap-1 relative">
-        <label className="text-xs font-medium text-slate-600">Invoice *</label>
+        <label className="text-xs font-medium text-slate-600">Tenant *</label>
         <input
-          value={invoiceSearch}
-          onChange={(e) => searchInvoices(e.target.value)}
-          placeholder="Type tenant name or property to search…"
+          value={tenantSearch}
+          onChange={(e) => searchTenants(e.target.value)}
+          placeholder="Type tenant name…"
           className={`rounded-lg border px-3 py-2 text-sm outline-none
             focus:ring-2 focus:ring-blue-500
-            ${errors.invoice_id ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
+            ${errors.tenant_id ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
         />
-        {errors.invoice_id && <p className="text-xs text-red-500">{errors.invoice_id}</p>}
+        {errors.tenant_id && <p className="text-xs text-red-500">{errors.tenant_id}</p>}
 
         {/* dropdown */}
-        {!selectedInvoice && invoiceSearch.length >= 2 && (
+        {!selectedTenant && tenantSearch.length >= 2 && (
           <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-xl
             border border-slate-200 bg-white shadow-lg max-h-56 overflow-y-auto">
             {searching && (
               <p className="px-4 py-3 text-xs text-slate-400 animate-pulse">Searching…</p>
             )}
-            {!searching && invoiceOptions.length === 0 && (
-              <p className="px-4 py-3 text-xs text-slate-500">No matching invoices found</p>
+            {!searching && tenantOptions.length === 0 && (
+              <p className="px-4 py-3 text-xs text-slate-500">No matching tenants found</p>
             )}
-            {invoiceOptions.map((inv) => (
-              <button key={inv.id} type="button"
-                onClick={() => selectInvoice(inv)}
+            {tenantOptions.map((t) => (
+              <button key={t.id} type="button"
+                onClick={() => selectTenant(t)}
                 className="w-full text-left px-4 py-3 hover:bg-blue-50
                   border-b border-slate-100 last:border-0 transition">
                 <p className="text-sm font-medium text-slate-800">
-                  {inv.tenant_name}
-                  <span className="ml-2 text-xs text-slate-400">{inv.property_name}</span>
-                </p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {formatBillingMonth(inv.billing_month)} · {inv.category} ·
-                  <span className="text-red-600 font-medium ml-1">
-                    Outstanding: {formatCurrency(inv.outstanding_balance)}
-                  </span>
+                  {t.name}
+                  {t.property_name && <span className="ml-2 text-xs text-slate-400">{t.property_name}</span>}
                 </p>
               </button>
             ))}
@@ -177,43 +238,102 @@ function RecordPaymentForm({ onSubmit, loading, showToast }) {
         )}
       </div>
 
-      {/* selected invoice summary */}
-      {selectedInvoice && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm relative">
-          <button type="button" onClick={clearInvoiceSelection} className="absolute top-2 right-2 p-1 hover:bg-blue-100 rounded-lg text-blue-400 hover:text-blue-600 transition-colors">
+      {/* selected tenant summary */}
+      {selectedTenant && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm relative mb-4">
+          <button type="button" onClick={clearTenantSelection} className="absolute top-2 right-2 p-1 hover:bg-blue-100 rounded-lg text-blue-400 hover:text-blue-600 transition-colors">
             <X className="h-4 w-4" />
           </button>
-          <div className="flex justify-between items-start pr-6">
-            <div>
-              <p className="font-semibold text-blue-900">{selectedInvoice.tenant_name}</p>
-              <p className="text-xs text-blue-700">
-                {selectedInvoice.property_name} · {formatBillingMonth(selectedInvoice.billing_month)} · {selectedInvoice.category}
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-blue-600">Outstanding</p>
-              <p className="font-bold text-red-600">
-                {formatCurrency(selectedInvoice.outstanding_balance)}
-              </p>
-            </div>
-          </div>
+          <p className="font-semibold text-blue-900">{selectedTenant.name}</p>
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="flex flex-col">
-          <Input
-            label="Amount (₹) *"
-            type="number"
-            value={form.amount}
-            onChange={set('amount')}
-            error={errors.amount}
-            placeholder="0"
-          />
-          {selectedInvoice && form.amount > selectedInvoice.outstanding_balance && (
-            <p className="text-[10px] text-orange-600 font-medium mt-1">Exceeds outstanding by {formatCurrency(form.amount - selectedInvoice.outstanding_balance)}</p>
+      {selectedTenant && (
+        <div className="border border-slate-200 rounded-xl overflow-hidden mb-4 bg-white shadow-sm">
+          <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+            <div className="flex flex-col w-full sm:w-2/3">
+              <label className="text-xs font-medium text-slate-600 mb-1">Total Payment Received</label>
+              <div className="flex gap-2">
+                <input 
+                  type="number" 
+                  value={totalPayment} 
+                  onChange={(e) => setTotalPayment(e.target.value)} 
+                  placeholder="e.g. 300000"
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 flex-1"
+                />
+                <Button variant="secondary" size="sm" onClick={handleAutoAllocate}>
+                  Auto Allocate
+                </Button>
+              </div>
+            </div>
+            <div className="text-left sm:text-right">
+              <p className="text-xs text-slate-500">Allocated</p>
+              <p className={`font-bold ${totalAllocated > 0 ? 'text-emerald-600' : 'text-slate-600'}`}>
+                {formatCurrency(totalAllocated)}
+              </p>
+            </div>
+          </div>
+          
+          <div className="max-h-64 overflow-y-auto p-1">
+            {invoices.length === 0 ? (
+              <p className="px-4 py-6 text-center text-sm text-slate-500">No outstanding invoices found for this tenant.</p>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="text-xs text-slate-500 border-b border-slate-100">
+                    <th className="px-3 py-2 font-medium"></th>
+                    <th className="px-3 py-2 font-medium">Month / Category</th>
+                    <th className="px-3 py-2 font-medium text-right">Outstanding</th>
+                    <th className="px-3 py-2 font-medium text-right w-32">Allocate (₹)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((inv) => {
+                    const alloc = allocations[inv.id] || { checked: false, amount: '', outstanding: 0 };
+                    const isExceeded = parseFloat(alloc.amount) > alloc.outstanding;
+                    return (
+                      <tr key={inv.id} className={`border-b border-slate-50 last:border-0 hover:bg-slate-50 transition ${alloc.checked ? 'bg-blue-50/30' : ''}`}>
+                        <td className="px-3 py-3 w-8">
+                          <input 
+                            type="checkbox" 
+                            checked={alloc.checked} 
+                            onChange={() => toggleInvoice(inv.id)}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                        </td>
+                        <td className="px-3 py-3">
+                          <p className="font-medium text-slate-800">{formatBillingMonth(inv.billing_month)}</p>
+                          <p className="text-xs text-slate-500">{inv.category}</p>
+                        </td>
+                        <td className="px-3 py-3 text-right font-medium text-red-600">
+                          {formatCurrency(alloc.outstanding)}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <input 
+                            type="number"
+                            value={alloc.amount}
+                            onChange={(e) => setAllocAmount(inv.id, e.target.value)}
+                            className={`w-full text-right rounded-md border px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500 ${isExceeded ? 'border-red-400 bg-red-50 text-red-700' : 'border-slate-200'}`}
+                            placeholder="0"
+                            disabled={!alloc.checked}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+          {errors.allocations && (
+            <div className="px-4 py-2 bg-red-50 border-t border-red-100">
+              <p className="text-xs text-red-600 font-medium">{errors.allocations}</p>
+            </div>
           )}
         </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Input
           label="Payment Date *"
           type="date"
@@ -222,7 +342,6 @@ function RecordPaymentForm({ onSubmit, loading, showToast }) {
           error={errors.payment_date}
         />
 
-        {/* payment mode */}
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-slate-600">Payment Mode *</label>
           <select
@@ -244,8 +363,7 @@ function RecordPaymentForm({ onSubmit, loading, showToast }) {
           placeholder="UTR / Cheque no."
         />
 
-        {/* file upload */}
-        <div className="col-span-2 flex flex-col gap-1">
+        <div className="col-span-1 sm:col-span-2 flex flex-col gap-1">
           <label className="text-xs font-medium text-slate-600">Receipt Attachment (PDF, Image)</label>
           <div className="flex items-center gap-3">
             <input
@@ -270,7 +388,7 @@ function RecordPaymentForm({ onSubmit, loading, showToast }) {
           </div>
         </div>
 
-        <div className="col-span-2 flex flex-col gap-1">
+        <div className="col-span-1 sm:col-span-2 flex flex-col gap-1">
           <label className="text-xs font-medium text-slate-600">Remarks</label>
           <textarea
             value={form.remarks}

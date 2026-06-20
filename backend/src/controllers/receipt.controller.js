@@ -98,83 +98,104 @@ export async function getReceiptById(req, res) {
 
 // ─── POST /receipts ───────────────────────────────────────────────────────────
 export async function createReceipt(req, res) {
-  const { invoice_id, amount, payment_date, payment_mode, reference_no, remarks, attachment_url } = req.body;
+  const { invoice_id, amount, allocations, payment_date, payment_mode, reference_no, remarks, attachment_url } = req.body;
+
+  // Resolve allocations (fallback to single invoice for backwards compatibility)
+  const resolvedAllocations = allocations || (invoice_id && amount ? [{ invoice_id, amount }] : []);
+
+  if (!resolvedAllocations.length) {
+    return res.status(400).json({ success: false, message: 'No allocations provided' });
+  }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const createdReceipts = [];
+    const updatedInvoices = [];
 
-    // lock invoice row for update
-    const invRes = await client.query(
-      `SELECT id, bill_amount, amount_collected, outstanding_balance, status
-       FROM invoices WHERE id = $1 FOR UPDATE`,
-      [invoice_id]
-    );
-    if (!invRes.rows.length) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    for (const alloc of resolvedAllocations) {
+      const invId = alloc.invoice_id;
+      const allocAmt = parseFloat(alloc.amount);
+
+      if (allocAmt <= 0) continue; // Skip zero allocations
+
+      // lock invoice row for update
+      const invRes = await client.query(
+        `SELECT id, bill_amount, amount_collected, outstanding_balance, status
+         FROM invoices WHERE id = $1 FOR UPDATE`,
+        [invId]
+      );
+      if (!invRes.rows.length) {
+        throw new Error(`Invoice ID ${invId} not found`);
+      }
+
+      const inv = invRes.rows[0];
+
+      // guard: can't over-collect
+      if (allocAmt > parseFloat(inv.outstanding_balance)) {
+        throw new Error(`Amount (${allocAmt}) exceeds outstanding balance (${inv.outstanding_balance}) for invoice ID ${invId}`);
+      }
+
+      // insert receipt
+      const recRes = await client.query(
+        `INSERT INTO receipts
+           (invoice_id, tenant_id, property_id, amount, payment_date,
+            payment_mode, reference_no, remarks, attachment_url)
+         SELECT $1, tenant_id, property_id, $2, $3, $4, $5, $6, $7
+         FROM invoices WHERE id = $1
+         RETURNING *`,
+        [invId, allocAmt, payment_date, payment_mode, reference_no ?? null, remarks ?? null, attachment_url ?? null]
+      );
+
+      createdReceipts.push(recRes.rows[0]);
+
+      // recalculate invoice
+      const newCollected = parseFloat(inv.amount_collected) + allocAmt;
+      const newOutstanding = parseFloat(inv.bill_amount) - newCollected;
+      const newStatus = newOutstanding <= 0 ? 'Paid'
+        : newCollected > 0 ? 'Partial'
+          : 'Pending';
+
+      const updInv = await client.query(
+        `UPDATE invoices
+         SET
+           amount_collected    = $1,
+           outstanding_balance = $2,
+           status              = $3
+         WHERE id = $4
+         RETURNING *`,
+        [newCollected, Math.max(0, newOutstanding), newStatus, invId]
+      );
+
+      updatedInvoices.push(updInv.rows[0]);
+      
+      // Audit log (fire and forget inside try block)
+      await logAudit(req.user, 'CREATE', 'RECEIPT', recRes.rows[0].id, { invoice_id: invId, amount: allocAmt, payment_date }).catch(console.error);
     }
-
-    const inv = invRes.rows[0];
-
-    // guard: can't over-collect
-    if (parseFloat(amount) > parseFloat(inv.outstanding_balance)) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({
-        success: false,
-        message: `Amount (${amount}) exceeds outstanding balance (${inv.outstanding_balance})`,
-      });
-    }
-
-    // insert receipt
-    const recRes = await client.query(
-      `INSERT INTO receipts
-         (invoice_id, tenant_id, property_id, amount, payment_date,
-          payment_mode, reference_no, remarks, attachment_url)
-       SELECT $1, tenant_id, property_id, $2, $3, $4, $5, $6, $7
-       FROM invoices WHERE id = $1
-       RETURNING *`,
-      [invoice_id, amount, payment_date, payment_mode, reference_no ?? null, remarks ?? null, attachment_url ?? null]
-    );
-
-    // recalculate invoice
-    const newCollected = parseFloat(inv.amount_collected) + parseFloat(amount);
-    const newOutstanding = parseFloat(inv.bill_amount) - newCollected;
-    const newStatus = newOutstanding <= 0 ? 'Paid'
-      : newCollected > 0 ? 'Partial'
-        : 'Pending';
-
-    // recalculate aging bucket based on new outstanding and overdue days
-    const updInv = await client.query(
-      `UPDATE invoices
-       SET
-         amount_collected    = $1,
-         outstanding_balance = $2,
-         status              = $3
-       WHERE id = $4
-       RETURNING *`,
-      [newCollected, Math.max(0, newOutstanding), newStatus, invoice_id]
-    );
 
     await client.query('COMMIT');
 
     res.status(201).json({
       success: true,
       data: {
-        receipt: recRes.rows[0],
-        updatedInvoice: updInv.rows[0],
+        receipts: createdReceipts,
+        updatedInvoices: updatedInvoices,
       },
     });
 
-    await logAudit(req.user, 'CREATE', 'RECEIPT', recRes.rows[0].id, { invoice_id, amount, payment_date });
-
   } catch (err) {
     await client.query('ROLLBACK');
-    throw err;
+    // If it's a known error from our throw statements, send a 400
+    if (err.message.includes('not found') || err.message.includes('exceeds outstanding')) {
+      res.status(400).json({ success: false, message: err.message });
+    } else {
+      throw err;
+    }
   } finally {
     client.release();
   }
 }
+
 
 // ─── DELETE /receipts/:id ─────────────────────────────────────────────────────
 // reverses the payment and restores invoice balance
