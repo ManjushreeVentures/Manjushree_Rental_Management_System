@@ -6,10 +6,10 @@ dotenv.config();
 export const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com', // fallback to Gmail, but they might use outlook
   port: process.env.SMTP_PORT || 587,
-  secure: process.env.SMTP_SECURE === 'true' || false, 
+  secure: process.env.SMTP_SECURE === 'true' || false,
   auth: {
-    user: process.env.SMTP_USER || 'manoj.c@manjushreeventures.com', 
-    pass: process.env.SMTP_PASS, // User must add SMTP_PASS to their .env file
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
   },
 });
 
@@ -63,14 +63,13 @@ export const generateReminderContent = (tenantName, invoicesList, totalOutstandi
       <div style="background-color: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #e2e8f0;">
         <p style="font-size: 14px; color: #64748b; margin: 0;">
           <strong>Manjushree Ventures</strong><br>
-          <a href="mailto:manoj.c@manjushreeventures.com" style="color: #2563eb; text-decoration: none;">manoj.c@manjushreeventures.com</a>
         </p>
       </div>
     </div>
   `;
 
   const subject = `Payment Reminder - Outstanding Balance of ₹ ${Number(totalOutstanding).toLocaleString('en-IN')}`;
-  
+
   return { subject, htmlContent };
 };
 
@@ -94,7 +93,7 @@ export const sendReminderEmail = async (toEmail, tenantName, invoicesList, total
     const plainText = html.replace(/<[^>]+>/g, '\n').replace(/\n\s*\n/g, '\n\n').trim();
 
     await transporter.sendMail({
-      from: '"Manjushree Ventures" <manoj.c@manjushreeventures.com>',
+      from: `"Manjushree Ventures" <${process.env.SMTP_USER}>`,
       to: toEmail,
       bcc: bcc || undefined,
       subject: subject,
